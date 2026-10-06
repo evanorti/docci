@@ -47,13 +47,31 @@ echo 'Started background process {{INDEX}} with PID '$DOCCI_BG_PID_{{INDEX}}
 sleep {{DELAY}}
 `
 
-	// Wait for endpoint template
+	// Wait for endpoint template.
+	//
+	// Readiness means something is answering on that port, not that it answers
+	// 200. An RPC server routes one POST-only path and returns 404 or 405 to a
+	// probe; it is still up, and a tutorial that waits for it should carry on.
+	// So any HTTP response counts, and only a refused connection does not.
+	//
+	// curl is preferred because wget is not installed on macOS by default. If
+	// neither exists the wait fails immediately and says so, rather than
+	// burning the whole timeout on a command that was never going to run.
 	waitForEndpointTemplate = `# Waiting for endpoint {{ENDPOINT}} (timeout: {{TIMEOUT}} seconds)
 echo 'Waiting for endpoint {{ENDPOINT}} to be ready...'
 
 timeout_secs={{TIMEOUT}}
 endpoint_url="{{ENDPOINT}}"
 start_time=$(date +%s)
+
+if command -v curl > /dev/null 2>&1; then
+    docci_probe() { curl -s -o /dev/null --max-time 5 "$1"; }
+elif command -v wget > /dev/null 2>&1; then
+    docci_probe() { wget -q --timeout=5 --tries=1 -O /dev/null "$1" || [ $? -eq 8 ]; }
+else
+    echo "Cannot wait for $endpoint_url: neither curl nor wget is installed"
+    exit 1
+fi
 
 while true; do
     current_time=$(date +%s)
@@ -64,7 +82,7 @@ while true; do
         exit 1
     fi
 
-    if wget -q --timeout=5 --tries=1 --spider "$endpoint_url" > /dev/null 2>&1; then
+    if docci_probe "$endpoint_url"; then
         echo "Endpoint $endpoint_url is ready"
         break
     fi

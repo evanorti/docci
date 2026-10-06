@@ -170,3 +170,52 @@ func TestPageWithoutFrontmatterIsUnchanged(t *testing.T) {
 	require.True(t, cfg.IsRunnable())
 	require.Len(t, blocks, 1)
 }
+
+// A background block used to skip text replacement entirely, so a page that
+// substitutes an isolated home directory or a test endpoint would run the
+// unsubstituted command. That failure is silent and can be destructive.
+func TestBackgroundBlocksGetTextReplacements(t *testing.T) {
+	page := strings.Join([]string{
+		"---",
+		"docci:",
+		"  replace-text:",
+		"    - \"serve;serve --home /sandbox\"",
+		"---",
+		"",
+		"<!-- docci background -->",
+		"",
+		"```bash",
+		"myapp serve",
+		"```",
+	}, "\n")
+
+	_, blocks, err := ParseDocument(page, "page.md")
+	require.NoError(t, err)
+	require.Len(t, blocks, 1)
+
+	script, _, _ := BuildExecutableScript(blocks)
+	require.Contains(t, script, "myapp serve --home /sandbox")
+	require.NotContains(t, script, "myapp serve\n")
+}
+
+func TestPageReplacementsApplyBeforeBlockOnes(t *testing.T) {
+	page := strings.Join([]string{
+		"---",
+		"docci:",
+		"  replace-text:",
+		"    - \"HOST;example.test\"",
+		"---",
+		"",
+		"<!-- docci replace-text=\"PORT;8080\" -->",
+		"",
+		"```bash",
+		"curl http://HOST:PORT/",
+		"```",
+	}, "\n")
+
+	_, blocks, err := ParseDocument(page, "page.md")
+	require.NoError(t, err)
+
+	script, _, _ := BuildExecutableScript(blocks)
+	require.Contains(t, script, "curl http://example.test:8080/")
+}

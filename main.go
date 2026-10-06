@@ -199,6 +199,14 @@ File paths in the JSON config are resolved relative to the config file's locatio
 			}
 		}
 
+		// A dry run prints the script and stops. It must not clean up after a
+		// run that never happened: the cleanup for a page that brings up a
+		// local stack tears that stack down, and doing it from --debug
+		// destroys state the author is still working against.
+		if debugMode {
+			return nil
+		}
+
 		// Run cleanup commands if provided
 		if len(cleanupCommands) > 0 {
 			log.Debug("running cleanup commands")

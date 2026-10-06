@@ -535,12 +535,29 @@ func BuildExecutableScriptWithOptions(blocks []CodeBlock, opts types.DocciOpts) 
 			}))
 		}
 
+		// Apply text replacements before anything else looks at the content,
+		// page-level ones first so a block can still override what the page did.
+		// This must happen above the background/foreground split: a background
+		// block that skipped it would silently run the unsubstituted command.
+		blockContent := block.Content
+		for _, replacement := range append(append([]string{}, block.PageReplacements...), block.ReplaceText) {
+			if replacement == "" {
+				continue
+			}
+			parts := strings.SplitN(replacement, ";", 2)
+			if len(parts) != 2 {
+				continue
+			}
+			blockContent = strings.ReplaceAll(blockContent, parts[0], parts[1])
+			log.Debug("Applied text replacement", "block", block.Index, "old", parts[0], "new", parts[1])
+		}
+
 		if block.Background {
 			// For background blocks, wrap in { } & and redirect output
 			script.WriteString(replaceTemplateVars(backgroundBlockTemplate, map[string]string{
 				"INDEX":     strconv.Itoa(block.Index),
 				"FILE_INFO": formatFileInfo(block.FileName),
-				"CONTENT":   block.Content,
+				"CONTENT":   blockContent,
 			}))
 			backgroundPIDs = append(backgroundPIDs, fmt.Sprintf("$DOCCI_BG_PID_%d", block.Index))
 			backgroundIndexes = append(backgroundIndexes, block.Index)
@@ -581,21 +598,6 @@ func BuildExecutableScriptWithOptions(blocks []CodeBlock, opts types.DocciOpts) 
 					"FILE":  block.IfFileNotExists,
 					"INDEX": strconv.Itoa(block.Index),
 				}))
-			}
-
-			// Apply text replacements, page-level ones first so a block can
-			// still override what the page did.
-			blockContent := block.Content
-			for _, replacement := range append(append([]string{}, block.PageReplacements...), block.ReplaceText) {
-				if replacement == "" {
-					continue
-				}
-				parts := strings.SplitN(replacement, ";", 2)
-				if len(parts) != 2 {
-					continue
-				}
-				blockContent = strings.ReplaceAll(blockContent, parts[0], parts[1])
-				log.Debug("Applied text replacement", "block", block.Index, "old", parts[0], "new", parts[1])
 			}
 
 			// Check if this is a file operation block
