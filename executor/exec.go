@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/reecepbcups/docci/logger"
+	"github.com/reecepbcups/docci/match"
 	"github.com/reecepbcups/docci/types"
 )
 
@@ -214,10 +215,10 @@ func ValidateOutputs(blockOutputs map[int]string, validationMap map[int]types.Va
 			continue
 		}
 
-		if validation.Expect != "" && !matchExpected(output, validation.Expect) {
+		if validation.Expect != "" && !match.Matches(output, validation.Expect) {
 			log.Error("Block output does not match its checkpoint", "block", validation.Label)
 			errors = append(errors, fmt.Errorf("%s: output does not match the expected output shown on the page.\n%s\n\nExpected:\n%s\n\nActual output:\n%s",
-				validation.Label, describeMismatch(output, validation.Expect), validation.Expect, output))
+				validation.Label, match.DescribeMismatch(output, validation.Expect), validation.Expect, output))
 			continue
 		}
 

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/reecepbcups/docci/logger"
+	"github.com/reecepbcups/docci/match"
 	"github.com/reecepbcups/docci/types"
 )
 
@@ -53,6 +54,26 @@ type CodeBlock struct {
 	ResetFile   bool   // reset-file: Reset the file to its original content
 	LineInsert  int    // line-insert: Insert content at line N (1-based)
 	LineReplace string // line-replace: Replace content at line N or N-M
+}
+
+// hasOutputCheck reports whether the block asserts anything about its output.
+func (c CodeBlock) hasOutputCheck() bool {
+	return c.OutputContains != "" || c.ExpectOutput != ""
+}
+
+// outputCheckCommand is the shell test the retry loop runs against a captured
+// attempt. It mirrors what ValidateOutputs does afterwards: a tripwire is a
+// literal containment test on the raw output, and a checkpoint is matched with
+// whitespace collapsed so the rendered block does not have to be byte-exact.
+func (c CodeBlock) outputCheckCommand() string {
+	capture := fmt.Sprintf("\"$docci_capture_%d\"", c.Index)
+
+	if c.ExpectOutput != "" {
+		return fmt.Sprintf("tr -s '[:space:]' ' ' < %s | grep -qE -- %s",
+			capture, match.ShellSingleQuote(match.ToERE(c.ExpectOutput)))
+	}
+
+	return fmt.Sprintf("grep -qF -- %s %s", match.ShellSingleQuote(c.OutputContains), capture)
 }
 
 // Describe locates a block for an error message, preferring whatever a reader
@@ -623,7 +644,21 @@ func BuildExecutableScriptWithOptions(blocks []CodeBlock, opts types.DocciOpts) 
 				})
 
 				// Add the actual code with retry logic if needed
-				if block.RetryCount > 0 {
+				if block.RetryCount > 0 && block.hasOutputCheck() {
+					retryDelay := GetRetryDelay()
+					script.WriteString(replaceTemplateVars(retryUntilOutputStartTemplate, map[string]string{
+						"INDEX":       strconv.Itoa(block.Index),
+						"MAX_RETRIES": strconv.Itoa(block.RetryCount),
+						"RETRY_DELAY": strconv.Itoa(retryDelay),
+						"LABEL":       block.Describe(),
+					}))
+					script.WriteString(codeContent)
+					script.WriteString(replaceTemplateVars(retryUntilOutputEndTemplate, map[string]string{
+						"INDEX": strconv.Itoa(block.Index),
+						"CHECK": block.outputCheckCommand(),
+						"LABEL": block.Describe(),
+					}))
+				} else if block.RetryCount > 0 {
 					retryDelay := GetRetryDelay()
 					script.WriteString(replaceTemplateVars(retryWrapperStartTemplate, map[string]string{
 						"INDEX":       strconv.Itoa(block.Index),

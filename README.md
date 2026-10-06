@@ -110,7 +110,10 @@ one that fails.
   * ⏲️ `delay-before=N`: Wait N seconds before running any commands in the block
   * ⏲️ `delay-after=N`: Wait N seconds after running all commands in the block
   * ⌛ `delay-per-cmd=N`: Wait N seconds before each command
-  * ⏲️ `retry=N`: Retry command N times *(pair with delay-per-cmd)*
+  * ⏲️ `retry=N`: Retry the block N times. Paired with `output-contains` or
+    `expect-output` it retries until that check passes, which is what a step
+    that polls needs -- the command exits cleanly while reporting a pending
+    state, so retrying on exit code alone never waits for anything
   * 🌐 `wait-for-endpoint=http://localhost:8080/health|N`: Wait up to N seconds for the endpoint to be ready
   * 📜 `output-contains="string"`: Ensure the output contains a string at the end of the block
   * ✅ `expect-output`: Mark the block as the expected output of the block above it
@@ -161,6 +164,26 @@ Write `\<...>` for output that really does contain `<...>`.
 Matching is "contains", not equality, and whitespace is collapsed on both
 sides: real output is surrounded by logs and prompts that no page should have
 to reproduce.
+
+Add `retry` when the output takes a while to arrive:
+
+````markdown
+<!-- docci name="transfer reaches a terminal state" retry=10 delay-per-cmd=2 -->
+
+```bash
+ibc relayer packets --chain-id 41001 --tx-hash "$TX"
+```
+
+<!-- docci expect-output -->
+
+```json
+{"state": "PACKET_STATE_SUCCEEDED", "sequenceNumber": "<...>"}
+```
+````
+
+The block runs until its expected output appears or the attempts run out. Each
+attempt is printed, so a CI log shows the state changing rather than one opaque
+wait.
 
 ### 📑 Page-level config
 
