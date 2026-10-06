@@ -4,7 +4,9 @@
 echo "Starting regular code block"
 ```
 
-```bash docci-background
+<!-- docci background -->
+
+```bash
 echo "Starting background server..."
 echo "Starting background" > $HOME/_tmp_docci_background_test.txt
 

@@ -12,7 +12,9 @@ rm test_example.json backup.txt || true
 
 The first block will create a config file only if it doesn't already exist:
 
-```bash docci-if-file-not-exists="test_example.json"
+<!-- docci if-file-not-exists="test_example.json" -->
+
+```bash
 echo "Creating config file since it doesn't exist..."
 echo '{"version": "1.0", "debug": false}' > test_example.json
 echo "Creating backup file..."
@@ -22,7 +24,9 @@ echo "Config and backup files created!"
 
 This second block should be skipped since the config file now exists:
 
-```bash docci-if-file-not-exists="test_example.json"
+<!-- docci if-file-not-exists="test_example.json" -->
+
+```bash
 echo "This should NOT run - test_example.json already exists"
 echo "This line should never be executed"
 ```
@@ -56,12 +60,16 @@ echo "Cleanup complete!"
 
 Test with a relative path:
 
-```bash docci-if-file-not-exists="./relative_test.txt"
+<!-- docci if-file-not-exists="./relative_test.txt" -->
+
+```bash
 echo "Creating file with relative path..."
 echo "test content" > "./relative_test.txt"
 ```
 
-```bash docci-if-file-not-exists="./relative_test.txt"
+<!-- docci if-file-not-exists="./relative_test.txt" -->
+
+```bash
 echo "This should be skipped - relative path file exists"
 ```
 

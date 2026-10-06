@@ -89,6 +89,39 @@ File paths in the JSON config are resolved relative to the config file's locatio
 			}
 		}
 
+		// Expand each page's prerequisites in front of it, and read the
+		// page-level config that decides what runs and what cleans up after.
+		runOrder, pageConfigs, err := parser.ResolveRunOrder(filePaths)
+		if err != nil {
+			return err
+		}
+
+		filePaths = filePaths[:0]
+		for _, path := range runOrder {
+			abs, _ := filepath.Abs(path)
+			cfg := pageConfigs[abs]
+
+			if !cfg.IsRunnable() {
+				log.Info("skipping page: runnable is false", "file", path)
+				continue
+			}
+
+			filePaths = append(filePaths, path)
+
+			// Cleanup is page-level because it is not instruction to the reader,
+			// but CI must not leave state behind for the next page.
+			cleanupCommands = append(cleanupCommands, cfg.Cleanup...)
+
+			if cfg.WorkingDir != "" && workingDir == "" {
+				workingDir = filepath.Join(filepath.Dir(abs), cfg.WorkingDir)
+			}
+		}
+
+		if len(filePaths) == 0 {
+			log.Info("nothing to run: every page opted out with runnable: false")
+			return nil
+		}
+
 		// Validate and change working directory if workingDir is specified
 		if workingDir != "" {
 			if _, err := os.Stat(workingDir); os.IsNotExist(err) {
@@ -140,7 +173,7 @@ File paths in the JSON config are resolved relative to the config file's locatio
 				markdown, _ := os.ReadFile(filePaths[0])
 				blocks, _ := parser.ParseCodeBlocks(string(markdown))
 				for _, block := range blocks {
-					if block.OutputContains != "" {
+					if block.OutputContains != "" || block.ExpectOutput != "" {
 						hasValidations = true
 						break
 					}
@@ -151,7 +184,7 @@ File paths in the JSON config are resolved relative to the config file's locatio
 					markdown, _ := os.ReadFile(filePath)
 					blocks, _ := parser.ParseCodeBlocks(string(markdown))
 					for _, block := range blocks {
-						if block.OutputContains != "" {
+						if block.OutputContains != "" || block.ExpectOutput != "" {
 							hasValidations = true
 							break
 						}

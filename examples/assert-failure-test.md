@@ -6,7 +6,9 @@ This example demonstrates the `docci-assert-failure` tag which expects code bloc
 
 This should fail as expected:
 
-```bash docci-assert-failure
+<!-- docci assert-failure -->
+
+```bash
 # This command doesn't exist and should fail
 nonexistentcommand --help
 ```
@@ -15,7 +17,9 @@ nonexistentcommand --help
 
 This should also fail as expected:
 
-```bash docci-assert-failure
+<!-- docci assert-failure -->
+
+```bash
 echo "This will print before failing"
 exit 1
 ```

@@ -4,11 +4,15 @@
 echo "Hello World"
 ```
 
-```bash docci-output-contains="test value"
+<!-- docci output-contains="test value" -->
+
+```bash
 VAR="test value"
 echo "This contains $VAR"
 ```
 
-```bash docci-output-contains="Success"
+<!-- docci output-contains="Success" -->
+
+```bash
 echo "Success: All tests passed!"
 ```

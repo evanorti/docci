@@ -2,14 +2,20 @@
 
 Test various quote combinations:
 
-```bash docci-output-contains='"operators": []'
+<!-- docci output-contains='"operators": []' -->
+
+```bash
 echo '{"operators": [], "test": "value"}'
 ```
 
-```bash docci-output-contains="simple text"
+<!-- docci output-contains="simple text" -->
+
+```bash
 echo "This is simple text without quotes"
 ```
 
-```bash docci-output-contains='text with "quotes" inside'
+<!-- docci output-contains='text with "quotes" inside' -->
+
+```bash
 echo 'Here is text with "quotes" inside it'
 ```

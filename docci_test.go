@@ -34,10 +34,10 @@ type TestExpectation struct {
 // All other files are expected to succeed by default
 var TestExpectations = map[string]TestExpectation{
 	"background-error-test.md": {
-		ExpectedInStderr: "Cannot use both docci-output-contains and docci-background",
+		ExpectedInStderr: "Cannot use both output-contains and background",
 	},
 	"assert-failure-unexpected-success.md": {
-		ExpectedInStderr: "Expected script to fail with non-zero exit code due to docci-assert-failure tag, but it succeeded",
+		ExpectedInStderr: "Expected script to fail with non-zero exit code due to assert-failure tag, but it succeeded",
 	},
 	"test-background-kill-invalid.md": {
 		ExpectedInStderr: "references a non-existent background process. Available background process indexes: [2]",
@@ -47,7 +47,7 @@ var TestExpectations = map[string]TestExpectation{
 // ServerEndpointTestExpectations defines expectations for server_endpoint examples
 var ServerEndpointTestExpectations = map[string]TestExpectation{
 	"test_incompatible_tags.md": {
-		ExpectedInStderr: "Cannot use both docci-wait-for-endpoint and docci-background",
+		ExpectedInStderr: "Cannot use both wait-for-endpoint and background",
 	},
 	"test_wait_timeout.md": {
 		ExpectedInStderr: "Error executing code block",

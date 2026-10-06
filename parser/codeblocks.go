@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"reflect"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -35,13 +37,44 @@ type CodeBlock struct {
 	FileName        string // Added for debugging multiple files
 	ReplaceText     string
 
-	// File operation fields
-	File        string // docci-file: The file name to operate on
-	ResetFile   bool   // docci-reset-file: Reset the file to its original content
-	LineInsert  int    // docci-line-insert: Insert content at line N (1-based)
-	LineReplace string // docci-line-replace: Replace content at line N or N-M
+	// ExpectOutput is the rendered block beneath this one that the reader is
+	// meant to compare their terminal against. Empty when the block has no
+	// visible checkpoint.
+	ExpectOutput string
 
-	content strings.Builder // Used during parsing to build content
+	// Name, Heading and StepTitle locate the block in the page, so that a
+	// failure says which step broke rather than which index.
+	Name      string
+	Heading   string
+	StepTitle string
+
+	// File operation fields
+	File        string // file: The file name to operate on
+	ResetFile   bool   // reset-file: Reset the file to its original content
+	LineInsert  int    // line-insert: Insert content at line N (1-based)
+	LineReplace string // line-replace: Replace content at line N or N-M
+}
+
+// Describe locates a block for an error message, preferring whatever a reader
+// would recognise: the name the author gave it, the step it sits in, or the
+// heading above it.
+func (c CodeBlock) Describe() string {
+	where := c.FileName
+	if where == "" {
+		where = "block"
+	}
+	where = fmt.Sprintf("%s:%d", where, c.LineNumber)
+
+	switch {
+	case c.Name != "":
+		return fmt.Sprintf("%s (%s)", where, c.Name)
+	case c.StepTitle != "":
+		return fmt.Sprintf("%s (step %q)", where, c.StepTitle)
+	case c.Heading != "":
+		return fmt.Sprintf("%s (under %q)", where, c.Heading)
+	default:
+		return where
+	}
 }
 
 // given a markdown file, parse out all the code blocks within it.
@@ -77,14 +110,9 @@ func (c *CodeBlock) applyTags(tags MetaTag, lineNumber int, fileName string) {
 	c.ResetFile = tags.ResetFile
 	c.LineInsert = tags.LineInsert
 	c.LineReplace = tags.LineReplace
+	c.Name = tags.Name
 	c.LineNumber = lineNumber
 	c.FileName = fileName
-	c.content.Reset()
-}
-
-// finalize converts the accumulated content from the builder to the Content field
-func (c *CodeBlock) finalize() {
-	c.Content = c.content.String()
 }
 
 // GetRetryDelay returns the retry delay in seconds from environment variable or default
@@ -97,85 +125,285 @@ func GetRetryDelay() int {
 	return 2 // Default 2 seconds
 }
 
-// ParseCodeBlocksWithMetadata returns structured code blocks with metadata
+// headingRe matches an ATX markdown heading outside of a fence.
+var headingRe = regexp.MustCompile(`^#{1,6}\s+(.*)$`)
+
+// stepTitleRe matches the title prop of an MDX <Step> component, so that a
+// failure can name the step a reader would be on rather than a block index.
+var stepTitleRe = regexp.MustCompile(`<Step\s[^>]*title\s*=\s*["']([^"']*)["']`)
+
+// directiveOpenRe matches the start of a docci directive comment, in either the
+// MDX form `{/* docci ... */}` or the markdown form `<!-- docci ... -->`.
+// An HTML comment is a parse error in MDX and a JSX comment is literal text in
+// markdown, so docci reads both and lets the page use whichever it needs.
+var directiveOpenRe = regexp.MustCompile(`^\s*(\{/\*|<!--)\s*docci\b`)
+
+// fenceRe matches a fence opening, capturing its indentation, its run of
+// backticks, and its info string. The info string belongs to the renderer --
+// docci never reads directives out of it.
+var fenceRe = regexp.MustCompile("^(\\s*)(`{3,})(.*)$")
+
+// pendingDirectives is a directive comment waiting for the code block it
+// describes.
+type pendingDirectives struct {
+	tags       MetaTag
+	lineNumber int
+}
+
+// ParseCodeBlocks returns structured code blocks with metadata
 func ParseCodeBlocks(markdown string) ([]CodeBlock, error) {
-	return ParseCodeBlocksWithFileName(markdown, "")
+	_, blocks, err := ParseDocument(markdown, "")
+	return blocks, err
 }
 
 // ParseCodeBlocksWithFileName returns structured code blocks with metadata and filename
 func ParseCodeBlocksWithFileName(markdown string, fileName string) ([]CodeBlock, error) {
+	_, blocks, err := ParseDocument(markdown, fileName)
+	return blocks, err
+}
+
+// ParseDocument reads a markdown or MDX page into its page-level config and its
+// executable code blocks.
+//
+// Directives live in comments above the block they describe, never in the fence
+// info string. A directive comment attaches to the next fence, with only blank
+// lines and other directive comments allowed in between; a comment that
+// attaches to nothing is an error rather than a silent skip, because a test
+// tool that quietly stops testing is worse than one that fails.
+func ParseDocument(document string, sourcePath string) (PageConfig, []CodeBlock, error) {
+	log := logger.GetLogger()
+
+	cfg, body, frontmatterLines, err := SplitFrontmatter(document)
+	if err != nil {
+		return cfg, nil, fmt.Errorf("%s: %w", sourcePath, err)
+	}
+
 	var codeBlocks []CodeBlock
-	var currentBlock *CodeBlock
-	lines := splitIntoLines(markdown)
-	startParsing := false
-	for idx, line := range lines {
-		lineNumber := idx + 1 // 1-based index for line numbers
+	var pending *pendingDirectives
+	var heading, stepTitle string
 
-		// stop the parsing when the codeblock ends
-		if startParsing {
-			if strings.Trim(line, " ") == "```" {
-				if currentBlock != nil && currentBlock.content.Len() > 0 {
-					// Only add the block if it should run on current OS and command conditions are met
-					if ShouldRunOnCurrentOS(currentBlock.OS) && ShouldRunBasedOnCommandInstallation(currentBlock.IfNotInstalled) {
-						currentBlock.finalize()
-						codeBlocks = append(codeBlocks, *currentBlock)
-					} else {
-						logger.GetLogger().Debug("Skipping code block due to OS restriction", "required_os", currentBlock.OS, "current_os", GetCurrentOS())
-					}
-					currentBlock = nil
-				}
-				startParsing = false
-				continue
+	// Index of the last executable block that was kept, so that an expect-output
+	// block can attach its contents to it. -1 means there is nothing to attach to.
+	lastExecutable := -1
+
+	lines := splitIntoLines(body)
+	for idx := 0; idx < len(lines); idx++ {
+		line := lines[idx]
+		lineNumber := idx + 1 + frontmatterLines
+		trimmed := strings.TrimSpace(line)
+
+		// A directive comment, which may span several lines.
+		if directiveOpenRe.MatchString(line) {
+			commentBody, consumed, err := readDirectiveComment(lines, idx)
+			if err != nil {
+				return cfg, nil, fmt.Errorf("%s:%d: %w", sourcePath, lineNumber, err)
 			}
 
-			// if not, then we add the text to the codeblock
-			if currentBlock != nil {
-				currentBlock.content.WriteString(line)
-				currentBlock.content.WriteString("\n")
-				logger.GetLogger().Debug("Adding line to code block", "line_number", lineNumber, "content", line)
+			tags, err := ParseDirectives(commentBody)
+			if err != nil {
+				return cfg, nil, fmt.Errorf("%s:%d: %w", sourcePath, lineNumber, err)
 			}
+
+			if pending == nil {
+				pending = &pendingDirectives{tags: tags, lineNumber: lineNumber}
+			} else {
+				pending.tags = mergeTags(pending.tags, tags)
+			}
+
+			idx += consumed
+			continue
 		}
 
-		// we only start parsing if the line contains ```bash, ```shell, or ```sh
-		// TODO: only run this if startParsing is false?
-		if strings.HasPrefix(line, "```") {
-			// Parse tags first to check for ignore
-			tags, err := ParseTags(line)
-			if err != nil {
-				return nil, fmt.Errorf("line %d: parse tags: %w", lineNumber, err)
+		// A fence opening.
+		if m := fenceRe.FindStringSubmatch(line); m != nil {
+			indent, backticks, info := m[1], m[2], strings.TrimSpace(m[3])
+
+			content, closed, consumed := readFenceBody(lines, idx, indent, len(backticks))
+			if !closed {
+				return cfg, nil, fmt.Errorf("%s:%d: unterminated code fence", sourcePath, lineNumber)
 			}
 
-			if tags.Ignore {
-				logger.GetLogger().Debug("Ignoring code block due to docci-ignore tag")
-				continue
+			lang := ""
+			if fields := strings.Fields(info); len(fields) > 0 {
+				lang = fields[0]
 			}
 
-			// Extract just the language part (before any tags)
-			lang := strings.TrimPrefix(line, "```")
-			lang = strings.TrimSpace(lang)
-			// Split by space to get just the language part
-			langParts := strings.Fields(lang)
-			if len(langParts) > 0 {
-				lang = langParts[0]
+			var tags MetaTag
+			if pending != nil {
+				tags = pending.tags
 			}
 
-			// Allow block if it's a valid language OR if it has file operation tags
-			if contains(ValidLangs, lang) || tags.File != "" {
-				// Validate tag combinations using the centralized validation
+			switch {
+			case tags.ExpectOutput:
+				if lastExecutable < 0 {
+					return cfg, nil, fmt.Errorf("%s:%d: expect-output has no code block above it to check", sourcePath, lineNumber)
+				}
+				if codeBlocks[lastExecutable].ExpectOutput != "" {
+					return cfg, nil, fmt.Errorf("%s:%d: %s already has an expected output block", sourcePath, lineNumber, codeBlocks[lastExecutable].Describe())
+				}
+				codeBlocks[lastExecutable].ExpectOutput = content
+				log.Debug("Attached expected output", "block", codeBlocks[lastExecutable].Index)
+
+			case tags.Ignore:
+				log.Debug("Ignoring code block due to ignore directive", "line", lineNumber)
+
+			case contains(ValidLangs, lang) || tags.File != "":
 				if err := tags.Validate(lineNumber); err != nil {
-					return nil, err
+					return cfg, nil, fmt.Errorf("%s: %w", sourcePath, err)
 				}
 
-				startParsing = true
-				currentBlock = newCodeBlock(len(codeBlocks)+1, lang)
-				currentBlock.applyTags(tags, lineNumber, fileName)
-				continue
+				if !ShouldRunOnCurrentOS(tags.OS) || !ShouldRunBasedOnCommandInstallation(tags.IfNotInstalled) {
+					log.Debug("Skipping code block", "required_os", tags.OS, "current_os", GetCurrentOS(), "line", lineNumber)
+					// Nothing to attach expected output to.
+					lastExecutable = -1
+					break
+				}
+
+				block := newCodeBlock(len(codeBlocks)+1, lang)
+				block.applyTags(tags, lineNumber, sourcePath)
+				block.Heading = heading
+				block.StepTitle = stepTitle
+				block.Content = content
+				codeBlocks = append(codeBlocks, *block)
+				lastExecutable = len(codeBlocks) - 1
+
+			default:
+				// A fence docci has no business running: a config sample, a
+				// rendered JSON response, a snippet in another language.
+				if pending != nil {
+					return cfg, nil, fmt.Errorf("%s:%d: directives attach to a %q block, which docci does not execute. Use expect-output, or remove the directives",
+						sourcePath, pending.lineNumber, lang)
+				}
 			}
+
+			pending = nil
+			idx += consumed
 			continue
+		}
+
+		// Track where we are in the page, for error messages.
+		if m := headingRe.FindStringSubmatch(line); m != nil {
+			heading = strings.TrimSpace(m[1])
+			stepTitle = ""
+		}
+		if m := stepTitleRe.FindStringSubmatch(line); m != nil {
+			stepTitle = m[1]
+		}
+
+		// Anything else between a directive comment and its block breaks the
+		// attachment, and is far more likely to be a mistake than an intent.
+		if pending != nil && trimmed != "" {
+			return cfg, nil, fmt.Errorf("%s:%d: directives are followed by prose, not a code block. A docci comment attaches to the code block directly below it",
+				sourcePath, pending.lineNumber)
 		}
 	}
 
-	// Validate background-kill references
+	if pending != nil {
+		return cfg, nil, fmt.Errorf("%s:%d: directives at the end of the page attach to no code block", sourcePath, pending.lineNumber)
+	}
+
+	if err := validateBackgroundKills(codeBlocks); err != nil {
+		return cfg, nil, err
+	}
+
+	return cfg, codeBlocks, nil
+}
+
+// readDirectiveComment returns the body of a directive comment -- everything
+// after the `docci` keyword and before the closing delimiter -- along with how
+// many extra lines it spanned.
+func readDirectiveComment(lines []string, start int) (string, int, error) {
+	open := lines[start]
+	closer := "*/}"
+	if strings.Contains(open, "<!--") {
+		closer = "-->"
+	}
+
+	var body strings.Builder
+	for i := start; i < len(lines); i++ {
+		line := lines[i]
+		if i == start {
+			line = directiveOpenRe.ReplaceAllString(line, "")
+		}
+		if cut := strings.Index(line, closer); cut >= 0 {
+			body.WriteString(line[:cut])
+			return body.String(), i - start, nil
+		}
+		body.WriteString(line)
+		body.WriteString(" ")
+	}
+
+	return "", 0, fmt.Errorf("unterminated docci comment: expected %q", closer)
+}
+
+// readFenceBody returns the contents of a fence, with the fence's own
+// indentation stripped so that a block nested inside <Steps> or <CodeGroup>
+// executes the same as one at the top level.
+func readFenceBody(lines []string, start int, indent string, backtickCount int) (string, bool, int) {
+	var content strings.Builder
+
+	for i := start + 1; i < len(lines); i++ {
+		line := lines[i]
+		trimmed := strings.TrimSpace(line)
+
+		if isFenceClose(trimmed, backtickCount) {
+			return content.String(), true, i - start
+		}
+
+		content.WriteString(stripIndent(line, indent))
+		content.WriteString("\n")
+	}
+
+	return content.String(), false, len(lines) - start - 1
+}
+
+// isFenceClose reports whether a line is a closing fence of at least the
+// opening fence's length.
+func isFenceClose(trimmed string, backtickCount int) bool {
+	if len(trimmed) < backtickCount {
+		return false
+	}
+	for _, r := range trimmed {
+		if r != '`' {
+			return false
+		}
+	}
+	return true
+}
+
+// stripIndent removes up to the fence's indentation from a content line,
+// leaving any deeper indentation the code itself relies on.
+func stripIndent(line string, indent string) string {
+	for i := 0; i < len(indent); i++ {
+		if len(line) == 0 || (line[0] != ' ' && line[0] != '\t') {
+			break
+		}
+		line = line[1:]
+	}
+	return line
+}
+
+// mergeTags folds a second directive comment into a first, so that consecutive
+// comments above one block behave as though they were written as one. A value
+// set by the later comment wins.
+func mergeTags(into MetaTag, from MetaTag) MetaTag {
+	dst := reflect.ValueOf(&into).Elem()
+	src := reflect.ValueOf(from)
+
+	for i := 0; i < src.NumField(); i++ {
+		field := src.Field(i)
+		if field.IsZero() {
+			continue
+		}
+		dst.Field(i).Set(field)
+	}
+
+	return into
+}
+
+// validateBackgroundKills checks that every background-kill names a background
+// process that actually exists.
+func validateBackgroundKills(codeBlocks []CodeBlock) error {
 	backgroundIndexes := make(map[int]bool)
 	for _, block := range codeBlocks {
 		if block.Background {
@@ -183,29 +411,29 @@ func ParseCodeBlocksWithFileName(markdown string, fileName string) ([]CodeBlock,
 		}
 	}
 
-	// Check all background-kill references
 	for _, block := range codeBlocks {
-		if block.BackgroundKill > 0 {
-			if !backgroundIndexes[block.BackgroundKill] {
-				// Find all available background indexes for error message
-				var availableIndexes []int
-				for idx := range backgroundIndexes {
-					availableIndexes = append(availableIndexes, idx)
-				}
-				sort.Ints(availableIndexes)
-
-				if len(availableIndexes) == 0 {
-					return nil, fmt.Errorf("block %d (line %d): docci-background-kill=%d references a non-existent background process. No background processes are defined in this file",
-						block.Index, block.LineNumber, block.BackgroundKill)
-				} else {
-					return nil, fmt.Errorf("block %d (line %d): docci-background-kill=%d references a non-existent background process. Available background process indexes: %v",
-						block.Index, block.LineNumber, block.BackgroundKill, availableIndexes)
-				}
-			}
+		if block.BackgroundKill == 0 {
+			continue
 		}
+		if backgroundIndexes[block.BackgroundKill] {
+			continue
+		}
+
+		var availableIndexes []int
+		for idx := range backgroundIndexes {
+			availableIndexes = append(availableIndexes, idx)
+		}
+		sort.Ints(availableIndexes)
+
+		if len(availableIndexes) == 0 {
+			return fmt.Errorf("%s: background-kill=%d references a non-existent background process. No background processes are defined in this file",
+				block.Describe(), block.BackgroundKill)
+		}
+		return fmt.Errorf("%s: background-kill=%d references a non-existent background process. Available background process indexes: %v",
+			block.Describe(), block.BackgroundKill, availableIndexes)
 	}
 
-	return codeBlocks, nil
+	return nil
 }
 
 // WaitForEndpoint polls an HTTP endpoint until it's ready or timeout is reached
@@ -241,7 +469,7 @@ func WaitForEndpoint(url string, timeoutSecs int) error {
 }
 
 // BuildExecutableScript creates a single script with validation markers
-func BuildExecutableScript(blocks []CodeBlock) (string, map[int]string, map[int]bool) {
+func BuildExecutableScript(blocks []CodeBlock) (string, map[int]types.Validation, map[int]bool) {
 	return BuildExecutableScriptWithOptions(blocks, types.DocciOpts{
 		HideBackgroundLogs: false,
 		KeepRunning:        false,
@@ -249,11 +477,11 @@ func BuildExecutableScript(blocks []CodeBlock) (string, map[int]string, map[int]
 }
 
 // BuildExecutableScriptWithOptions creates a single script with validation markers and options
-func BuildExecutableScriptWithOptions(blocks []CodeBlock, opts types.DocciOpts) (string, map[int]string, map[int]bool) {
+func BuildExecutableScriptWithOptions(blocks []CodeBlock, opts types.DocciOpts) (string, map[int]types.Validation, map[int]bool) {
 	log := logger.GetLogger()
 	var script strings.Builder
-	validationMap := make(map[int]string)  // maps block index to expected output
-	assertFailureMap := make(map[int]bool) // maps block index to assert-failure flag
+	validationMap := make(map[int]types.Validation) // maps block index to what its output must satisfy
+	assertFailureMap := make(map[int]bool)          // maps block index to assert-failure flag
 	var backgroundPIDs []string
 	debugEnabled := logger.IsDebugEnabled()
 
@@ -430,8 +658,12 @@ func BuildExecutableScriptWithOptions(blocks []CodeBlock, opts types.DocciOpts) 
 			}))
 
 			// Store validation requirement if present
-			if block.OutputContains != "" {
-				validationMap[block.Index] = block.OutputContains
+			if block.OutputContains != "" || block.ExpectOutput != "" {
+				validationMap[block.Index] = types.Validation{
+					Label:    block.Describe(),
+					Contains: block.OutputContains,
+					Expect:   block.ExpectOutput,
+				}
 			}
 			// Store assert-failure requirement if present
 			if block.AssertFailure {

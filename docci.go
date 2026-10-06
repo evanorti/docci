@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/reecepbcups/docci/executor"
@@ -48,7 +47,7 @@ func RunDocciFileWithOptions(filePath string, opts types.DocciOpts) DocciResult 
 
 	// Parse code blocks with metadata
 	log.Debug("Parsing code blocks from markdown")
-	blocks, err := parser.ParseCodeBlocks(string(markdown))
+	blocks, err := parser.ParseCodeBlocksWithFileName(string(markdown), filePath)
 	if err != nil {
 		log.Error("Failed to parse code blocks", "error", err.Error())
 		return DocciResult{
@@ -95,10 +94,10 @@ func RunDocciFileWithOptions(filePath string, opts types.DocciOpts) DocciResult 
 				Success:  false,
 				ExitCode: 1,
 				Stdout:   resp.Stdout,
-				Stderr:   "Error: Expected script to fail with non-zero exit code due to docci-assert-failure tag, but it succeeded",
+				Stderr:   "Error: Expected script to fail with non-zero exit code due to assert-failure tag, but it succeeded",
 			}
 		}
-		log.Info("✓ Code block failed as expected due to docci-assert-failure tag")
+		log.Info("✓ Code block failed as expected due to assert-failure tag")
 		// Script failed as expected, continue processing
 	} else if resp.Error != nil {
 		// No assert-failure blocks, so error is unexpected
@@ -126,6 +125,9 @@ func RunDocciFileWithOptions(filePath string, opts types.DocciOpts) DocciResult 
 			for _, err := range validationErrors {
 				errorMsg += fmt.Sprintf("❌ %s\n", err.Error())
 			}
+			// Print the detail rather than only the one-line summary the logger
+			// emitted: a CI log has to say what the output should have been.
+			fmt.Fprint(os.Stderr, errorMsg)
 			return DocciResult{
 				Success:          false,
 				ExitCode:         1,
@@ -160,10 +162,10 @@ func RunDocciCommand(filePath string) {
 	if result.Success && len(result.ValidationErrors) == 0 {
 		// Check if there were any validations that passed
 		markdown, _ := os.ReadFile(filePath)
-		blocks, _ := parser.ParseCodeBlocks(string(markdown))
+		blocks, _ := parser.ParseCodeBlocksWithFileName(string(markdown), filePath)
 		hasValidations := false
 		for _, block := range blocks {
-			if block.OutputContains != "" || block.AssertFailure {
+			if block.OutputContains != "" || block.ExpectOutput != "" || block.AssertFailure {
 				hasValidations = true
 				break
 			}
@@ -211,8 +213,7 @@ func RunDocciFilesWithOptions(filePaths []string, opts types.DocciOpts) DocciRes
 
 		// Parse code blocks with filename metadata
 		log.Debug("Parsing code blocks", "path", filePath)
-		fileName := filepath.Base(filePath)
-		blocks, err := parser.ParseCodeBlocksWithFileName(string(markdown), fileName)
+		blocks, err := parser.ParseCodeBlocksWithFileName(string(markdown), filePath)
 		if err != nil {
 			log.Error("Failed to parse code blocks", "path", filePath, "error", err.Error())
 			return DocciResult{
@@ -269,10 +270,10 @@ func RunDocciFilesWithOptions(filePaths []string, opts types.DocciOpts) DocciRes
 				Success:  false,
 				ExitCode: 1,
 				Stdout:   resp.Stdout,
-				Stderr:   "Error: Expected script to fail with non-zero exit code due to docci-assert-failure tag, but it succeeded",
+				Stderr:   "Error: Expected script to fail with non-zero exit code due to assert-failure tag, but it succeeded",
 			}
 		}
-		log.Info("✓ Code block failed as expected due to docci-assert-failure tag")
+		log.Info("✓ Code block failed as expected due to assert-failure tag")
 		// Script failed as expected, continue processing
 	} else if resp.Error != nil {
 		// No assert-failure blocks, so error is unexpected
@@ -300,6 +301,9 @@ func RunDocciFilesWithOptions(filePaths []string, opts types.DocciOpts) DocciRes
 			for _, err := range validationErrors {
 				errorMsg += fmt.Sprintf("❌ %s\n", err.Error())
 			}
+			// Print the detail rather than only the one-line summary the logger
+			// emitted: a CI log has to say what the output should have been.
+			fmt.Fprint(os.Stderr, errorMsg)
 			return DocciResult{
 				Success:          false,
 				ExitCode:         1,

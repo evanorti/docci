@@ -2,13 +2,17 @@
 
 ## Basic
 
-```bash docci-output-contains="Value is: 42" docci-replace-text="PLACEHOLDER;42"
+<!-- docci output-contains="Value is: 42" replace-text="PLACEHOLDER;42" -->
+
+```bash
 echo "Value is: PLACEHOLDER"
 ```
 
 ## Multiple Occurrences
 
-```bash docci-replace-text="XXX;YYY"
+<!-- docci replace-text="XXX;YYY" -->
+
+```bash
 echo "XXX appears here"
 echo "And XXX appears here too"
 echo "Even XXX appears a third time"
@@ -21,7 +25,9 @@ MY_SECRET_ENV_VAR="secret123"
 
 ## Replacement with an Environment Variable
 
-```bash docci-output-contains="secret123" docci-replace-text="SECRET_HERE;$MY_SECRET_ENV_VAR"
+<!-- docci output-contains="secret123" replace-text="SECRET_HERE;$MY_SECRET_ENV_VAR" -->
+
+```bash
 echo "SECRET_HERE"
 ```
 
@@ -29,6 +35,8 @@ echo "SECRET_HERE"
 
 Complex replacement that puts multiple commands in 1 command, keeping the original
 
-```bash docci-output-contains="xyz" docci-replace-text="abc;echo abc;echo xyz"
+<!-- docci output-contains="xyz" replace-text="abc;echo abc;echo xyz" -->
+
+```bash
 echo "abc"
 ```

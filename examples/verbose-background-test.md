@@ -4,7 +4,9 @@
 echo "Starting main execution"
 ```
 
-```bash docci-background
+<!-- docci background -->
+
+```bash
 echo "Background process started"
 for i in {1..5}; do
   echo "Background: Processing item $i"

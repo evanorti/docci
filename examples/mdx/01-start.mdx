@@ -1,0 +1,65 @@
+---
+title: "Start the counter"
+description: "A page that exercises indented fences, tripwires and a checkpoint."
+docci:
+  cleanup:
+    - rm -f counter.txt
+---
+
+Everything here runs in a temporary directory.
+
+## Before you start
+
+{/* docci output-contains="bash" */}
+
+```bash
+echo "running under $(basename $SHELL || echo bash)bash"
+```
+
+## Create the counter
+
+<Steps>
+  <Step title="Write the first value">
+    The fence below is indented inside an MDX component, which is where a
+    line-based parser usually stops seeing code blocks at all.
+
+    {/* docci name="write the counter" */}
+
+    ```bash
+    echo "3" > counter.txt
+    ```
+  </Step>
+
+  <Step title="Read it back">
+    {/* docci
+      retry=2
+      delay-per-cmd=0.1
+    */}
+
+    ```bash
+    cat counter.txt
+    ```
+  </Step>
+</Steps>
+
+## Check the counter
+
+{/* docci name="counter reports a height" */}
+
+```bash
+echo "{"
+echo "  \"height\": \"$(cat counter.txt)\","
+echo "  \"ready\": true"
+echo "}"
+```
+
+The height changes every run, so the page shows a placeholder for it:
+
+{/* docci expect-output */}
+
+```json
+{
+  "height": "<...>",
+  "ready": true
+}
+```

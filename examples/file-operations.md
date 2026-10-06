@@ -4,7 +4,9 @@ This example demonstrates the new file operation tags in docci.
 
 ## Create a new HTML file
 
-```html docci-file="example.html" docci-reset-file
+<!-- docci file="example.html" reset-file -->
+
+```html
 <!DOCTYPE html>
 <html>
     <head>
@@ -18,38 +20,50 @@ This example demonstrates the new file operation tags in docci.
 
 ## Verify the file was created
 
-```bash docci-output-contains="<!DOCTYPE html>"
+<!-- docci output-contains="<!DOCTYPE html>" -->
+
+```bash
 cat example.html
 ```
 
 ## Fix the typo in the title (line 4)
 
-```html docci-file="example.html" docci-line-replace="4"
+<!-- docci file="example.html" line-replace="4" -->
+
+```html
         <title>My Title</title>
 ```
 
 ## Verify the typo was fixed
 
-```bash docci-output-contains="My Title"
+<!-- docci output-contains="My Title" -->
+
+```bash
 grep "title" example.html
 ```
 
 ## Insert content after the h1 tag (line 7)
 
-```html docci-file="example.html" docci-line-insert="7"
+<!-- docci file="example.html" line-insert="7" -->
+
+```html
         <p>This is a paragraph</p>
         <p>This is another paragraph</p>
 ```
 
 ## Verify the paragraphs were added
 
-```bash docci-output-contains="This is a paragraph"
+<!-- docci output-contains="This is a paragraph" -->
+
+```bash
 cat example.html
 ```
 
 ## Create a CSS file
 
-```css docci-file="styles.css"
+<!-- docci file="styles.css" -->
+
+```css
 body {
     font-family: Arial, sans-serif;
     margin: 0;
@@ -63,7 +77,9 @@ h1 {
 
 ## Add more styles at the end
 
-```css docci-file="styles.css" docci-line-insert="10"
+<!-- docci file="styles.css" line-insert="10" -->
+
+```css
 
 p {
     line-height: 1.6;
@@ -73,19 +89,25 @@ p {
 
 ## Replace the h1 color (line 8)
 
-```css docci-file="styles.css" docci-line-replace="8"
+<!-- docci file="styles.css" line-replace="8" -->
+
+```css
     color: #0066cc;
 ```
 
 ## Verify the final CSS
 
-```bash docci-output-contains="color: #0066cc"
+<!-- docci output-contains="color: #0066cc" -->
+
+```bash
 cat styles.css
 ```
 
 ## Test conditional file creation
 
-```bash docci-if-file-not-exists="example.html"
+<!-- docci if-file-not-exists="example.html" -->
+
+```bash
 echo "This should not run because example.html exists"
 ```
 

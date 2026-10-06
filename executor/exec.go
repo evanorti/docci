@@ -6,10 +6,12 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 	"sync"
 
 	"github.com/reecepbcups/docci/logger"
+	"github.com/reecepbcups/docci/types"
 )
 
 type ExecResponse struct {
@@ -53,7 +55,7 @@ func Exec(commands string) (ExecResponse, error) {
 	}
 
 	var stdoutBuf, stderrBuf strings.Builder // captures output for further validation
-	var mu sync.Mutex // For thread-safe string builder access
+	var mu sync.Mutex                        // For thread-safe string builder access
 
 	// Create goroutines to read both stdout and stderr concurrently
 	done := make(chan bool, 2)
@@ -183,26 +185,43 @@ func ParseBlockOutputs(output string) map[int]string {
 }
 
 // ValidateOutputs checks if block outputs contain expected strings
-func ValidateOutputs(blockOutputs map[int]string, validationMap map[int]string) []error {
+func ValidateOutputs(blockOutputs map[int]string, validationMap map[int]types.Validation) []error {
 	log := logger.GetLogger()
-	log.Debug("Validating block outputs against expected strings")
+	log.Debug("Validating block outputs")
 	var errors []error
 
-	for blockIndex, expectedContains := range validationMap {
+	// Sort so that failures are reported in page order rather than map order.
+	indexes := make([]int, 0, len(validationMap))
+	for blockIndex := range validationMap {
+		indexes = append(indexes, blockIndex)
+	}
+	sort.Ints(indexes)
+
+	for _, blockIndex := range indexes {
+		validation := validationMap[blockIndex]
+
 		output, exists := blockOutputs[blockIndex]
 		if !exists {
-			log.Error("No output found for block", "block", blockIndex)
-			errors = append(errors, fmt.Errorf("no output found for block %d", blockIndex))
+			log.Error("No output found for block", "block", validation.Label)
+			errors = append(errors, fmt.Errorf("%s: produced no output to check", validation.Label))
 			continue
 		}
 
-		if !strings.Contains(output, expectedContains) {
-			log.Error("Block validation failed: output does not contain expected", "block", blockIndex, "expected", expectedContains)
-			errors = append(errors, fmt.Errorf("block %d: output does not contain expected string '%s'\nActual output:\n%s",
-				blockIndex, expectedContains, output))
-		} else {
-			log.Debug("Block validation passed: found expected string", "block", blockIndex, "expected", expectedContains)
+		if validation.Contains != "" && !strings.Contains(output, validation.Contains) {
+			log.Error("Block output does not contain expected string", "block", validation.Label, "expected", validation.Contains)
+			errors = append(errors, fmt.Errorf("%s: output does not contain %q\nActual output:\n%s",
+				validation.Label, validation.Contains, output))
+			continue
 		}
+
+		if validation.Expect != "" && !matchExpected(output, validation.Expect) {
+			log.Error("Block output does not match its checkpoint", "block", validation.Label)
+			errors = append(errors, fmt.Errorf("%s: output does not match the expected output shown on the page.\n%s\n\nExpected:\n%s\n\nActual output:\n%s",
+				validation.Label, describeMismatch(output, validation.Expect), validation.Expect, output))
+			continue
+		}
+
+		log.Debug("Block validation passed", "block", validation.Label)
 	}
 
 	return errors
