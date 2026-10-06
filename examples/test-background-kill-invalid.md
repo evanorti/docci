@@ -10,7 +10,9 @@ echo "This is a regular block at index 1"
 
 ## Background block (index 2)
 
-```bash docci-background
+<!-- docci background -->
+
+```bash
 echo "This is a background block at index 2"
 sleep 10
 ```
@@ -23,6 +25,8 @@ echo "This is a regular block at index 3"
 
 ## Try to kill a non-background block (should fail)
 
-```bash docci-background-kill="1"
+<!-- docci background-kill="1" -->
+
+```bash
 echo "This should not execute"
 ```

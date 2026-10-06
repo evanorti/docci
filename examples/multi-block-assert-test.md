@@ -8,7 +8,9 @@ echo "Block 1 success"
 ```
 
 ## Block 2: Should fail (expected)
-```bash docci-assert-failure
+<!-- docci assert-failure -->
+
+```bash
 echo "Block 2 failing as expected"
 exit 1
 ```

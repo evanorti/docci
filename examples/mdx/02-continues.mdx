@@ -1,0 +1,15 @@
+---
+title: "Continue from the counter"
+docci:
+  needs:
+    - 01-start
+---
+
+This page builds on the previous one rather than repeating its setup, so the
+prerequisite is run and tested too.
+
+{/* docci output-contains="counter is 3" */}
+
+```bash
+echo "counter is $(cat counter.txt)"
+```

@@ -13,7 +13,9 @@ echo "Start time: $(date)"
 
 Now wait 2 seconds before running the next command:
 
-```bash docci-delay-before="1.5"
+<!-- docci delay-before="1.5" -->
+
+```bash
 END_TIME=$(date +%s)
 ELAPSED=$((END_TIME - START_TIME))
 echo "End time: $(date)"

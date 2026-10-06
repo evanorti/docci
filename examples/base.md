@@ -12,7 +12,9 @@ sleep 0.1
 echo "other text"
 ```
 
-```shell docci-ignore
+<!-- docci ignore -->
+
+```shell
 echo "This is ignored"
 ```
 
@@ -28,7 +30,9 @@ func main() {
 }
 ```
 
-```bash docci-output-contains="Persist test"
+<!-- docci output-contains="Persist test" -->
+
+```bash
 # ensure VAR is set, if not exit 1
 if [ -z "$VAR" ]; then
   echo "VAR is not set, exiting"

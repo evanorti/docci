@@ -6,7 +6,9 @@ This example demonstrates the `docci-os` and `docci-machine` tags for OS-specifi
 
 This should run on Linux systems only:
 
-```bash docci-os=linux
+<!-- docci os=linux -->
+
+```bash
 echo "This is running on Linux!"
 uname -s
 ```
@@ -15,7 +17,9 @@ uname -s
 
 This should run on macOS systems only:
 
-```bash docci-os=macos
+<!-- docci os=macos -->
+
+```bash
 echo "This is running on macOS!"
 sw_vers
 ```
@@ -24,7 +28,9 @@ sw_vers
 
 This should run on Windows systems only:
 
-```bash docci-os=windows
+<!-- docci os=windows -->
+
+```bash
 echo "This is running on Windows!"
 ver
 ```
@@ -33,7 +39,9 @@ ver
 
 This should also work with the alias:
 
-```bash docci-machine=linux
+<!-- docci machine=linux -->
+
+```bash
 echo "Using docci-machine alias for Linux"
 ```
 

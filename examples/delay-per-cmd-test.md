@@ -6,7 +6,9 @@ This example demonstrates the `docci-delay-per-cmd` functionality that adds a de
 
 The `docci-delay-per-cmd` tag adds a specified delay (in seconds) between each command in a code block:
 
-```bash docci-delay-per-cmd=1 docci-output-contains="SUCCESS: Timestamps are different"
+<!-- docci delay-per-cmd=1 output-contains="SUCCESS: Timestamps are different" -->
+
+```bash
 TIME1=$(date +%H:%M:%S)
 TIME2=$(date +%H:%M:%S)
 

@@ -6,7 +6,9 @@ This example demonstrates how unsupported OS values are handled.
 
 This should be skipped because "bsd" is not one of the supported OS types:
 
-```bash docci-os=bsd
+<!-- docci os=bsd -->
+
+```bash
 echo "This should not run"
 exit 1
 ```

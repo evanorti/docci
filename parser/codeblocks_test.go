@@ -84,7 +84,7 @@ func TestCodeBlockRetryParsing(t *testing.T) {
 	markdown := `
 # Test Retry
 
-` + "```bash docci-retry=3\necho \"test\"\n```" + `
+` + "<!-- docci retry=3 -->\n\n```bash\necho \"test\"\n```" + `
 	`
 
 	blocks, err := ParseCodeBlocks(markdown)
@@ -97,7 +97,7 @@ func TestDelayAfterSecs(t *testing.T) {
 	markdown := `
 # Test Delay After
 
-` + "```bash docci-delay-after=5\necho \"test\"\n```" + `
+` + "<!-- docci delay-after=5 -->\n\n```bash\necho \"test\"\n```" + `
 	`
 
 	blocks, err := ParseCodeBlocks(markdown)
@@ -115,7 +115,7 @@ func TestDelayBeforeSecs(t *testing.T) {
 	markdown := `
 # Test Delay Before
 
-` + "```bash docci-delay-before=3\necho \"test\"\n```" + `
+` + "<!-- docci delay-before=3 -->\n\n```bash\necho \"test\"\n```" + `
 	`
 
 	blocks, err := ParseCodeBlocks(markdown)
@@ -152,7 +152,7 @@ func TestDelayPerCmdParsing(t *testing.T) {
 	markdown := `
 # Test Delay Per Command
 
-` + "```bash docci-delay-per-cmd=2\necho \"first\"\necho \"second\"\n```" + `
+` + "<!-- docci delay-per-cmd=2 -->\n\n```bash\necho \"first\"\necho \"second\"\n```" + `
 	`
 
 	blocks, err := ParseCodeBlocks(markdown)
@@ -166,7 +166,7 @@ func TestDelayPerCmdAliasParsing(t *testing.T) {
 	markdown := `
 # Test Delay Per Command Alias
 
-` + "```bash docci-cmd-delay=3\necho \"test\"\n```" + `
+` + "<!-- docci cmd-delay=3 -->\n\n```bash\necho \"test\"\n```" + `
 	`
 
 	blocks, err := ParseCodeBlocks(markdown)
@@ -179,7 +179,7 @@ func TestDelayPerCmdScriptGeneration(t *testing.T) {
 	markdown := `
 # Test Delay Per Command Script Generation
 
-` + "```bash docci-delay-per-cmd=1\necho \"first command\"\necho \"second command\"\n```" + `
+` + "<!-- docci delay-per-cmd=1 -->\n\n```bash\necho \"first command\"\necho \"second command\"\n```" + `
 	`
 
 	blocks, err := ParseCodeBlocks(markdown)
@@ -199,7 +199,7 @@ func TestDelayPerCmdWithRetry(t *testing.T) {
 	markdown := `
 # Test Delay Per Command with Retry
 
-` + "```bash docci-delay-per-cmd=2 docci-retry=3\necho \"test command\"\n```" + `
+` + "<!-- docci delay-per-cmd=2 retry=3 -->\n\n```bash\necho \"test command\"\n```" + `
 	`
 
 	blocks, err := ParseCodeBlocks(markdown)
@@ -221,7 +221,7 @@ func TestDelayPerCmdExecutionTiming(t *testing.T) {
 	markdown := `
 # Test Delay Per Command Execution Timing
 
-` + "```bash docci-delay-per-cmd=1\necho \"test\"\n```" + `
+` + "<!-- docci delay-per-cmd=1 -->\n\n```bash\necho \"test\"\n```" + `
 	`
 
 	blocks, err := ParseCodeBlocks(markdown)
@@ -252,7 +252,7 @@ func TestDelayPerCmdFloatParsing(t *testing.T) {
 	markdown := `
 # Test Delay Per Command Float Values
 
-` + "```bash docci-delay-per-cmd=0.1\necho \"test\"\n```" + `
+` + "<!-- docci delay-per-cmd=0.1 -->\n\n```bash\necho \"test\"\n```" + `
 	`
 
 	blocks, err := ParseCodeBlocks(markdown)

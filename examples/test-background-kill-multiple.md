@@ -4,7 +4,9 @@ This example demonstrates killing specific background processes by index.
 
 ## Start first background service
 
-```bash docci-background
+<!-- docci background -->
+
+```bash
 # Start a simple HTTP server on port 8081
 echo "Starting server 1 on port 8081"
 python3 -m http.server 8081
@@ -12,7 +14,9 @@ python3 -m http.server 8081
 
 ## Start second background service
 
-```bash docci-background
+<!-- docci background -->
+
+```bash
 # Start another HTTP server on port 8082
 echo "Starting server 2 on port 8082"
 python3 -m http.server 8082
@@ -28,7 +32,9 @@ curl -s http://localhost:8082 > /dev/null && echo "Server 2 (port 8082) is runni
 
 ## Kill only the first server
 
-```bash docci-background-kill="1"
+<!-- docci background-kill="1" -->
+
+```bash
 echo "Killed server 1, waiting for it to stop..."
 sleep 1
 ```
@@ -52,7 +58,9 @@ fi
 
 ## Kill the second server
 
-```bash docci-background-kill="2"
+<!-- docci background-kill="2" -->
+
+```bash
 echo "Now killing server 2..."
 sleep 1
 ```

@@ -4,13 +4,17 @@ This example demonstrates the new `docci-retry` tag functionality.
 
 ## Test 1: Command that succeeds on first try
 
-```bash docci-retry=2
+<!-- docci retry=2 -->
+
+```bash
 echo "This should work on the first attempt"
 ```
 
 ## Test 2: Command that fails and needs retries
 
-```bash docci-retry=2
+<!-- docci retry=2 -->
+
+```bash
 # This will fail the first few times but eventually succeed
 if [ ! -f /tmp/retry_test_counter ]; then
     echo "0" > /tmp/retry_test_counter
@@ -33,13 +37,17 @@ fi
 
 ## Test 3: Using alias for retry
 
-```bash docci-repeat=2
+<!-- docci repeat=2 -->
+
+```bash
 echo "Using the docci-repeat alias"
 ```
 
 ## Test 4: Command that always fails (should fail after max retries)
 
-```bash docci-retry=2 docci-assert-failure
+<!-- docci retry=2 assert-failure -->
+
+```bash
 echo "This will always fail"
 exit 1
 ```
