@@ -70,7 +70,15 @@ func (c CodeBlock) hasOutputCheck() bool {
 // literal containment test on the raw output, and a checkpoint is matched with
 // whitespace collapsed so the rendered block does not have to be byte-exact.
 func (c CodeBlock) outputCheckCommand() string {
-	capture := fmt.Sprintf("\"$docci_capture_%d\"", c.Index)
+	return c.outputCheckAgainst(fmt.Sprintf("\"$docci_capture_%d\"", c.Index))
+}
+
+// backgroundOutputCheckCommand tests a background process's log instead.
+func (c CodeBlock) backgroundOutputCheckCommand() string {
+	return c.outputCheckAgainst(fmt.Sprintf("/tmp/docci_bg_%d.out", c.Index))
+}
+
+func (c CodeBlock) outputCheckAgainst(capture string) string {
 
 	if c.ExpectOutput != "" {
 		// A real ESC byte in the sed pattern, so colour escapes are stripped the
@@ -559,6 +567,19 @@ func BuildExecutableScriptWithOptions(blocks []CodeBlock, opts types.DocciOpts) 
 				"FILE_INFO": formatFileInfo(block.FileName),
 				"CONTENT":   blockContent,
 			}))
+			if block.hasOutputCheck() {
+				// Sixty seconds is long enough for a process that prints a
+				// readiness line, and short enough that a hung start fails the
+				// page rather than the CI job's own timeout.
+				timeout := 60
+				script.WriteString(replaceTemplateVars(backgroundAwaitTemplate, map[string]string{
+					"INDEX":   strconv.Itoa(block.Index),
+					"TIMEOUT": strconv.Itoa(timeout),
+					"CHECK":   block.backgroundOutputCheckCommand(),
+					"LABEL":   block.Describe(),
+				}))
+			}
+
 			backgroundPIDs = append(backgroundPIDs, fmt.Sprintf("$DOCCI_BG_PID_%d", block.Index))
 			backgroundIndexes = append(backgroundIndexes, block.Index)
 		} else {
@@ -705,8 +726,10 @@ func BuildExecutableScriptWithOptions(blocks []CodeBlock, opts types.DocciOpts) 
 				"INDEX": strconv.Itoa(block.Index),
 			}))
 
-			// Store validation requirement if present
-			if block.OutputContains != "" || block.ExpectOutput != "" {
+			// Store validation requirement if present. Background blocks are
+			// checked in the script, against their log, so they are not
+			// revalidated here -- there is no block output to revalidate.
+			if block.hasOutputCheck() && !block.Background {
 				validationMap[block.Index] = types.Validation{
 					Label:    block.Describe(),
 					Contains: block.OutputContains,
