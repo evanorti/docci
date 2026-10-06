@@ -96,6 +96,16 @@ curl -s localhost:3000/health
 ```
 ````
 
+A value containing double quotes can be written either way:
+
+````markdown
+<!-- docci output-contains='"status": "valid"' -->
+<!-- docci output-contains="\"status\": \"valid\"" -->
+````
+
+Asserting on a key and its value together is worth the quoting: `valid` alone
+matches anywhere in the output, including a field you did not mean.
+
 A comment attaches to the code block directly below it. Only blank lines and
 other docci comments may come between. A comment that attaches to nothing is an
 error, not a silent skip -- a test tool that quietly stops testing is worse than

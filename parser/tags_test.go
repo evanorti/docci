@@ -187,3 +187,19 @@ func TestDelayBefore(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "requires a value")
 }
+
+// Asserting on a JSON key and its value together needs escaped quotes inside a
+// double-quoted directive value. Without this the value re-tokenises and the
+// directive fails to parse, so every structural assertion has to weaken to a
+// bare substring.
+func TestEscapedQuotesInDirectiveValue(t *testing.T) {
+	mt, err := ParseDirectives(`output-contains="\"status\": \"valid\""`)
+	require.NoError(t, err)
+	require.Equal(t, `"status": "valid"`, mt.OutputContains)
+}
+
+func TestSingleQuotedValueKeepsDoubleQuotes(t *testing.T) {
+	mt, err := ParseDirectives(`output-contains='"status": "valid"'`)
+	require.NoError(t, err)
+	require.Equal(t, `"status": "valid"`, mt.OutputContains)
+}

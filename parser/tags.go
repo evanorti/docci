@@ -229,7 +229,9 @@ func TagAlias(tag string) (string, error) {
 // optionally quoted. Directives are scoped by the comment, so unlike the old
 // fence-line form there is no risk of matching something in prose.
 func ParseDirectives(body string) (MetaTag, error) {
-	pattern := `[a-zA-Z0-9-]+(?:=(?:"[^"]*"|'[^']*'|[^\s]+))?`
+	// A double-quoted value may contain escaped quotes, which is the only way
+	// to assert on a JSON key and value together.
+	pattern := `[a-zA-Z0-9-]+(?:=(?:"(?:[^"\\]|\\.)*"|'[^']*'|[^\s]+))?`
 
 	re := regexp.MustCompile(pattern)
 	matches := re.FindAllString(body, -1)
@@ -256,9 +258,13 @@ func parseTagsFromPotential(potential []string) (MetaTag, error) {
 			content = s[1] // take the content part after the =
 
 			// Remove quotes if present (both single and double quotes)
-			if (strings.HasPrefix(content, "\"") && strings.HasSuffix(content, "\"")) ||
-				(strings.HasPrefix(content, "'") && strings.HasSuffix(content, "'")) {
-				content = content[1 : len(content)-1] // Remove first and last character (quotes)
+			if strings.HasPrefix(content, "'") && strings.HasSuffix(content, "'") && len(content) >= 2 {
+				content = content[1 : len(content)-1]
+			} else if strings.HasPrefix(content, "\"") && strings.HasSuffix(content, "\"") && len(content) >= 2 {
+				content = content[1 : len(content)-1]
+				// Unescape, so output-contains="\"status\": \"valid\"" asserts on
+				// the JSON pair rather than failing to parse.
+				content = strings.NewReplacer(`\"`, `"`, `\\`, `\`).Replace(content)
 			}
 
 			tag = strings.TrimSpace(tag) // trim any spaces
