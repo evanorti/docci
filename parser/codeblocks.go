@@ -43,6 +43,10 @@ type CodeBlock struct {
 	// visible checkpoint.
 	ExpectOutput string
 
+	// PageReplacements are the page-level replace-text substitutions, applied
+	// before any the block declares itself.
+	PageReplacements []string
+
 	// Name, Heading and StepTitle locate the block in the page, so that a
 	// failure says which step broke rather than which index.
 	Name      string
@@ -69,8 +73,11 @@ func (c CodeBlock) outputCheckCommand() string {
 	capture := fmt.Sprintf("\"$docci_capture_%d\"", c.Index)
 
 	if c.ExpectOutput != "" {
-		return fmt.Sprintf("tr -s '[:space:]' ' ' < %s | grep -qE -- %s",
-			capture, match.ShellSingleQuote(match.ToERE(c.ExpectOutput)))
+		// A real ESC byte in the sed pattern, so colour escapes are stripped the
+		// same way the post-run check strips them, on both BSD and GNU sed.
+		stripANSI := "sed 's/\x1b\\[[0-9;]*[a-zA-Z]//g'"
+		return fmt.Sprintf("%s < %s | tr -s '[:space:]' ' ' | grep -qE -- %s",
+			stripANSI, capture, match.ShellSingleQuote(match.ToERE(c.ExpectOutput)))
 	}
 
 	return fmt.Sprintf("grep -qF -- %s %s", match.ShellSingleQuote(c.OutputContains), capture)
@@ -284,6 +291,7 @@ func ParseDocument(document string, sourcePath string) (PageConfig, []CodeBlock,
 				block.applyTags(tags, lineNumber, sourcePath)
 				block.Heading = heading
 				block.StepTitle = stepTitle
+				block.PageReplacements = cfg.ReplaceText
 				block.Content = content
 				codeBlocks = append(codeBlocks, *block)
 				lastExecutable = len(codeBlocks) - 1
@@ -575,16 +583,19 @@ func BuildExecutableScriptWithOptions(blocks []CodeBlock, opts types.DocciOpts) 
 				}))
 			}
 
-			// Apply text replacement if needed
+			// Apply text replacements, page-level ones first so a block can
+			// still override what the page did.
 			blockContent := block.Content
-			if block.ReplaceText != "" {
-				parts := strings.SplitN(block.ReplaceText, ";", 2)
-				if len(parts) == 2 {
-					oldText := parts[0]
-					newText := parts[1]
-					blockContent = strings.ReplaceAll(blockContent, oldText, newText)
-					log.Debug("Applied text replacement", "block", block.Index, "old", oldText, "new", newText)
+			for _, replacement := range append(append([]string{}, block.PageReplacements...), block.ReplaceText) {
+				if replacement == "" {
+					continue
 				}
+				parts := strings.SplitN(replacement, ";", 2)
+				if len(parts) != 2 {
+					continue
+				}
+				blockContent = strings.ReplaceAll(blockContent, parts[0], parts[1])
+				log.Debug("Applied text replacement", "block", block.Index, "old", parts[0], "new", parts[1])
 			}
 
 			// Check if this is a file operation block

@@ -52,6 +52,12 @@ func TestCheckpointMatching(t *testing.T) {
 			want:     false,
 		},
 		{
+			name:     "colour escapes in output do not have to be matched",
+			actual:   "\x1b[0;32m[16:31:35]\x1b[0m Chains are live",
+			expected: "<...> Chains are live",
+			want:     true,
+		},
+		{
 			name:     "missing output fails",
 			actual:   "",
 			expected: "height: <...>",

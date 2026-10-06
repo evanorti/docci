@@ -27,6 +27,14 @@ type PageConfig struct {
 
 	// WorkingDir changes directory before the page's first block.
 	WorkingDir string `yaml:"working-dir"`
+
+	// ReplaceText substitutes text in every block before execution, as
+	// "old;new". A page that has to run against a sandbox -- an isolated home
+	// directory, a test endpoint, a key supplied by CI -- needs one
+	// substitution across every command, and repeating a directive above each
+	// block would bury the page in scaffolding. The reader still sees the
+	// command they are meant to run.
+	ReplaceText []string `yaml:"replace-text"`
 }
 
 // IsRunnable reports whether the page opted out of execution.

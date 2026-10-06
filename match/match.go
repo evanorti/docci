@@ -48,10 +48,18 @@ func toPattern(expected string) (*regexp.Regexp, error) {
 	return regexp.Compile(sb.String())
 }
 
-// collapseWhitespace reduces every run of whitespace to a single space, so that
-// indentation and line breaks do not decide whether a checkpoint passes.
+// ansiRe matches the escape sequences a tool emits when it colours its output.
+var ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+
+var whitespaceRe = regexp.MustCompile(`\s+`)
+
+// collapseWhitespace reduces every run of whitespace to a single space and
+// strips colour escapes, so that indentation, line breaks and a tool's choice
+// to colour its output do not decide whether a checkpoint passes. Nobody should
+// have to paste escape sequences into a page to make a check match.
 func collapseWhitespace(s string) string {
-	return strings.TrimSpace(regexp.MustCompile(`\s+`).ReplaceAllString(s, " "))
+	s = ansiRe.ReplaceAllString(s, "")
+	return strings.TrimSpace(whitespaceRe.ReplaceAllString(s, " "))
 }
 
 // DescribeMismatch says which line of the expected output first failed to
