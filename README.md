@@ -115,7 +115,7 @@ one that fails.
     that polls needs -- the command exits cleanly while reporting a pending
     state, so retrying on exit code alone never waits for anything
   * 🌐 `wait-for-endpoint=http://localhost:8080/health|N`: Wait up to N seconds for the endpoint to be ready
-  * 📜 `output-contains="string"`: Ensure the output contains a string at the end of the block
+  * 📜 `output-contains="string"`: Ensure the output contains a string at the end of the block. Output means stdout and stderr together, the way the reader sees it in their terminal
   * ✅ `expect-output`: Mark the block as the expected output of the block above it
   * 🚨 `assert-failure`: If it is expected to fail (non 0 exit code)
   * 🖥️ `os=mac|linux`: Run the command only on the specified OS

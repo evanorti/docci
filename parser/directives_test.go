@@ -219,3 +219,28 @@ func TestPageReplacementsApplyBeforeBlockOnes(t *testing.T) {
 	script, _, _ := BuildExecutableScript(blocks)
 	require.Contains(t, script, "curl http://example.test:8080/")
 }
+
+// A reader watching their terminal sees stdout and stderr interleaved, so a
+// page describes both. A tool that logs to stderr -- which most CLIs do --
+// would otherwise make a page's claim true for a human and false for CI.
+func TestBlockOutputIncludesStderr(t *testing.T) {
+	page := "<!-- docci output-contains=\"from stderr\" -->\n\n```bash\necho 'from stderr' >&2\n```"
+
+	blocks, err := ParseCodeBlocks(page)
+	require.NoError(t, err)
+
+	script, _, _ := BuildExecutableScript(blocks)
+	require.Contains(t, script, "exec 2>&1", "command stderr has to reach the block's captured output")
+	require.Contains(t, script, "exec 9>&2", "docci's own narration needs a channel of its own")
+}
+
+// docci's per-command narration must not land in a block's output, or an
+// assertion could match the text of its own command rather than its result.
+func TestNarrationStaysOutOfBlockOutput(t *testing.T) {
+	blocks, err := ParseCodeBlocks("```bash\necho hi\n```")
+	require.NoError(t, err)
+
+	script, _, _ := BuildExecutableScript(blocks)
+	require.Contains(t, script, "Executing CMD: $BASH_COMMAND\" >&9")
+	require.NotContains(t, script, "Executing CMD: $BASH_COMMAND\" >&2")
+}

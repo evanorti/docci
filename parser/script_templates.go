@@ -2,8 +2,18 @@ package parser
 
 // Script templates for bash code generation
 const (
-	// Main script template with cleanup trap
-	scriptCleanupTemplate = `# Cleanup function for background processes
+	// Main script template with cleanup trap.
+	//
+	// fd 9 keeps the real stderr, then stderr is merged into stdout for
+	// everything else. A reader watching their terminal sees stdout and stderr
+	// interleaved, so that is what a page describes and what docci has to check
+	// -- a tool that logs to stderr would otherwise make a page's claim true
+	// for a human and false for CI. docci's own narration goes to fd 9 so it
+	// never lands inside a block's captured output.
+	scriptCleanupTemplate = `exec 9>&2
+exec 2>&1
+
+# Cleanup function for background processes
 cleanup_background_processes() {
 {{DEBUG_CLEANUP}} jobs -p | xargs -r kill 2>/dev/null
 }
@@ -49,14 +59,14 @@ while true; do
     fi
 
     if ! kill -0 $DOCCI_BG_PID_{{INDEX}} 2>/dev/null; then
-        echo "{{LABEL}}: exited before printing its expected output" >&2
-        cat /tmp/docci_bg_{{INDEX}}.out >&2
+        echo "{{LABEL}}: exited before printing its expected output" >&9
+        cat /tmp/docci_bg_{{INDEX}}.out >&9
         exit 1
     fi
 
     if [ $docci_bg_waited -ge $docci_bg_deadline ]; then
-        echo "{{LABEL}}: expected output never appeared after ${docci_bg_deadline}s" >&2
-        cat /tmp/docci_bg_{{INDEX}}.out >&2
+        echo "{{LABEL}}: expected output never appeared after ${docci_bg_deadline}s" >&9
+        cat /tmp/docci_bg_{{INDEX}}.out >&9
         exit 1
     fi
 
@@ -138,7 +148,7 @@ if [ ! -f "{{FILE}}" ]; then
 	// Code execution with per-command delay template
 	codeExecutionTemplate = `# Enable per-command delay ({{DELAY}} seconds) and command display
 set {{BASH_FLAGS}}
-trap 'echo -e "\n     Executing CMD: $BASH_COMMAND" >&2; sleep {{DELAY}}' DEBUG
+trap 'echo -e "\n     Executing CMD: $BASH_COMMAND" >&9; sleep {{DELAY}}' DEBUG
 
 {{CONTENT}}
 trap - DEBUG # reset trap
@@ -209,7 +219,7 @@ while [ $retry_count -le $max_retries ]; do
 
   retry_count=$((retry_count + 1))
   if [ $retry_count -gt $max_retries ]; then
-    echo "{{LABEL}}: expected output never appeared after $max_retries attempts" >&2
+    echo "{{LABEL}}: expected output never appeared after $max_retries attempts" >&9
     rm -f "$docci_capture_{{INDEX}}"
     exit 1
   fi
