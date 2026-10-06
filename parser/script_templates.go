@@ -122,6 +122,50 @@ while [ $retry_count -le $max_retries ]; do
 done
 `
 
+	// Retry wrapper for a block that is waiting for its expected output to
+	// appear. A block that polls -- "it will read PENDING for up to a minute,
+	// then SUCCEEDED" -- exits zero the whole time, so retrying only on a
+	// non-zero exit never waits for anything. This retries until the block's
+	// own check passes.
+	//
+	// Output is captured rather than streamed, so that each attempt can be
+	// tested. Every attempt is still printed, in order.
+	retryUntilOutputStartTemplate = `# Block {{INDEX}}: retry until the expected output appears (max attempts: {{MAX_RETRIES}})
+retry_count=0
+max_retries={{MAX_RETRIES}}
+docci_capture_{{INDEX}}=$(mktemp)
+while [ $retry_count -le $max_retries ]; do
+  if [ $retry_count -gt 0 ]; then
+    echo "Retry attempt $retry_count/$max_retries: {{LABEL}}"
+    sleep {{RETRY_DELAY}}
+  fi
+
+  : > "$docci_capture_{{INDEX}}"
+  if (
+`
+
+	retryUntilOutputEndTemplate = `  ) > "$docci_capture_{{INDEX}}" 2>&1; then
+    cat "$docci_capture_{{INDEX}}"
+    if {{CHECK}}; then
+      rm -f "$docci_capture_{{INDEX}}"
+      break
+    fi
+    echo "{{LABEL}}: ran, but its expected output has not appeared yet"
+  else
+    exit_code=$?
+    cat "$docci_capture_{{INDEX}}"
+    echo "{{LABEL}}: exited with $exit_code"
+  fi
+
+  retry_count=$((retry_count + 1))
+  if [ $retry_count -gt $max_retries ]; then
+    echo "{{LABEL}}: expected output never appeared after $max_retries attempts"
+    rm -f "$docci_capture_{{INDEX}}"
+    exit 1
+  fi
+done
+`
+
 	// Delay after template
 	delayAfterTemplate = `# Delay after block {{INDEX}} for {{DELAY}} seconds
 sleep {{DELAY}}

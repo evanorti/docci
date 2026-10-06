@@ -149,3 +149,54 @@ func TestMDXRunnableFalseIsSkipped(t *testing.T) {
 		t.Error("runnable: false was not read from frontmatter")
 	}
 }
+
+// TestMDXRetryWaitsForOutput covers the case a polling tutorial step creates: a
+// command that exits cleanly while reporting a pending state. Retrying only on
+// a non-zero exit never waits for anything, so retry has to re-check the
+// block's own expected output.
+func TestMDXRetryWaitsForOutput(t *testing.T) {
+	t.Setenv("DOCCI_RETRY_DELAY", "0")
+
+	withExampleDir(t, func() {
+		defer os.Remove("attempts.txt")
+
+		result := RunDocciFileWithOptions("04-poll.mdx", types.DocciOpts{HideBackgroundLogs: true})
+		if !result.Success {
+			t.Fatalf("a block that polls to success was reported as failed: %s", result.Stderr)
+		}
+		if !strings.Contains(result.Stdout, "PACKET_STATE_PENDING") {
+			t.Error("expected the pending attempts to be shown, not swallowed")
+		}
+		if !strings.Contains(result.Stdout, "PACKET_STATE_SUCCEEDED") {
+			t.Error("expected the successful attempt to be shown")
+		}
+	})
+}
+
+// TestMDXRetryGivesUpLoudly checks that output which never arrives fails the
+// page and names the step, rather than hanging or passing.
+func TestMDXRetryGivesUpLoudly(t *testing.T) {
+	t.Setenv("DOCCI_RETRY_DELAY", "0")
+
+	document, _ := os.ReadFile("examples/mdx/04-poll.mdx")
+	never := strings.Replace(string(document), `-ge 3 `, `-ge 99 `, 1)
+	if never == string(document) {
+		t.Fatal("test fixture did not change")
+	}
+
+	withExampleDir(t, func() {
+		if err := os.WriteFile("never.mdx", []byte(never), 0644); err != nil {
+			t.Fatalf("write fixture: %v", err)
+		}
+		defer os.Remove("never.mdx")
+		defer os.Remove("attempts.txt")
+
+		result := RunDocciFileWithOptions("never.mdx", types.DocciOpts{HideBackgroundLogs: true})
+		if result.Success {
+			t.Fatal("output that never appeared was reported as success")
+		}
+		if !strings.Contains(result.Stdout, "transfer reaches a terminal state") {
+			t.Errorf("giving up did not name the step: %s", result.Stdout)
+		}
+	})
+}

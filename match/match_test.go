@@ -1,4 +1,4 @@
-package executor
+package match
 
 import "testing"
 
@@ -61,8 +61,8 @@ func TestCheckpointMatching(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := matchExpected(tc.actual, tc.expected); got != tc.want {
-				t.Errorf("matchExpected() = %v, want %v\nactual:   %q\nexpected: %q", got, tc.want, tc.actual, tc.expected)
+			if got := Matches(tc.actual, tc.expected); got != tc.want {
+				t.Errorf("Matches() = %v, want %v\nactual:   %q\nexpected: %q", got, tc.want, tc.actual, tc.expected)
 			}
 		})
 	}
@@ -72,9 +72,9 @@ func TestDescribeMismatchNamesTheFirstMissingLine(t *testing.T) {
 	actual := "height: 12\nready: false"
 	expected := "height: <...>\nready: true"
 
-	got := describeMismatch(actual, expected)
+	got := DescribeMismatch(actual, expected)
 	want := "first line that did not appear: ready: true"
 	if got != want {
-		t.Errorf("describeMismatch() = %q, want %q", got, want)
+		t.Errorf("DescribeMismatch() = %q, want %q", got, want)
 	}
 }

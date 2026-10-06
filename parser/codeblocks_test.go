@@ -127,7 +127,7 @@ func TestDelayBeforeSecs(t *testing.T) {
 	script, _, _ := BuildExecutableScript(blocks)
 	require.Contains(t, script, "sleep 3")
 	require.Contains(t, script, "# Delay before block 1 for 3 seconds")
-	
+
 	// Verify the delay comes before the actual command
 	scriptLines := strings.Split(script, "\n")
 	var foundDelay, foundEcho bool
@@ -290,7 +290,7 @@ func TestCommandSubstitutionNoDebugContamination(t *testing.T) {
 	// and NOT contain "Executing CMD:" or "date +"
 	require.Contains(t, resp.Stdout, "Date is: ")
 	require.Regexp(t, `Date is: \d{4}-\d{2}-\d{2}`, resp.Stdout)
-	
+
 	// Ensure the date line doesn't contain debug output
 	require.NotContains(t, resp.Stdout, "Executing CMD:")
 	require.NotContains(t, resp.Stdout, "date +%Y-%m-%d")
