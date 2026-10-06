@@ -1,15 +1,29 @@
 package main
 
 import (
+	"net"
 	"os"
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/reecepbcups/docci/types"
 )
 
 func TestReadme(t *testing.T) {
+	// The README starts a demo server on :3000 and curls it. If something else
+	// on the machine already holds that port, this tests the other process
+	// rather than docci, and fails for a reason that has nothing to do with the
+	// change under test. Say so instead of reporting a false failure.
+	// Dial rather than bind: a listener on another interface, or one holding the
+	// port with SO_REUSEADDR, still breaks the README's demo server even though
+	// binding 127.0.0.1 appears to succeed.
+	if conn, err := net.DialTimeout("tcp", "127.0.0.1:3000", 2*time.Second); err == nil {
+		conn.Close()
+		t.Skip("something is already listening on port 3000, so the README's demo server cannot start")
+	}
+
 	// Read the README.md file
 	readmeContent, err := os.ReadFile("README.md")
 	if err != nil {

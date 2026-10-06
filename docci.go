@@ -106,7 +106,9 @@ func RunDocciFileWithOptions(filePath string, opts types.DocciOpts) DocciResult 
 			Success:  false,
 			ExitCode: 1,
 			Stdout:   resp.Stdout,
-			Stderr:   fmt.Sprintf("Error executing code block: %s", resp.Error.Error()),
+			// Keep the script's own stderr: it carries the message that says
+			// which step failed and why. The exit status alone does not.
+			Stderr: fmt.Sprintf("%s\nError executing code block: %s", resp.Stderr, resp.Error.Error()),
 		}
 	}
 
@@ -282,7 +284,7 @@ func RunDocciFilesWithOptions(filePaths []string, opts types.DocciOpts) DocciRes
 			Success:  false,
 			ExitCode: 1,
 			Stdout:   resp.Stdout,
-			Stderr:   fmt.Sprintf("Error executing merged code blocks: %s", resp.Error.Error()),
+			Stderr:   fmt.Sprintf("%s\nError executing merged code blocks: %s", resp.Stderr, resp.Error.Error()),
 		}
 	}
 

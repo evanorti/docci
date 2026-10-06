@@ -34,7 +34,7 @@ type TestExpectation struct {
 // All other files are expected to succeed by default
 var TestExpectations = map[string]TestExpectation{
 	"background-error-test.md": {
-		ExpectedInStderr: "Cannot use both output-contains and background",
+		ExpectedInStderr: "exited before printing its expected output",
 	},
 	"assert-failure-unexpected-success.md": {
 		ExpectedInStderr: "Expected script to fail with non-zero exit code due to assert-failure tag, but it succeeded",

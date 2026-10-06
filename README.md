@@ -185,6 +185,34 @@ The block runs until its expected output appears or the attempts run out. Each
 attempt is printed, so a CI log shows the state changing rather than one opaque
 wait.
 
+### 🔌 Checking a background process
+
+A long-running process has no exit code to wait on and no block output to
+validate afterwards, so its startup output used to be the one thing on a page
+that nothing checked. Give a background block an `expect-output` and docci
+waits for that text to appear in the process's log before moving on.
+
+````markdown
+<!-- docci name="start the relayer" background -->
+
+```bash
+ibc relayer run
+```
+
+It prints a readiness line once both chains are connected:
+
+<!-- docci expect-output -->
+
+```
+level=INFO msg=Readiness readiness="{Event:ready ChainsConnected:[<...>]}"
+```
+````
+
+This replaces a guessed `delay-after`, and it is better than
+`wait-for-endpoint` when the process says in its own words that it is ready.
+If the process exits first, or the line never appears within sixty seconds, the
+page fails and its log is printed.
+
 ### 📑 Page-level config
 
 A page can carry docci config in its YAML frontmatter. Mintlify and other MDX

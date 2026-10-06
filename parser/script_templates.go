@@ -34,6 +34,38 @@ echo 'Started background process {{INDEX}} with PID '$DOCCI_BG_PID_{{INDEX}}
 
 `
 
+	// Waits for a background process to print the output the page says it
+	// prints. A long-running process has no exit code to check and no block
+	// output to validate afterwards, so its rendered output used to be the one
+	// thing on a page that nothing verified -- exactly the rot that showing
+	// executed output is meant to remove. This watches its log instead.
+	backgroundAwaitTemplate = `# Waiting for background block {{INDEX}} to print its expected output (timeout: {{TIMEOUT}}s)
+docci_bg_deadline={{TIMEOUT}}
+docci_bg_waited=0
+while true; do
+    if {{CHECK}}; then
+        echo "{{LABEL}}: started"
+        break
+    fi
+
+    if ! kill -0 $DOCCI_BG_PID_{{INDEX}} 2>/dev/null; then
+        echo "{{LABEL}}: exited before printing its expected output" >&2
+        cat /tmp/docci_bg_{{INDEX}}.out >&2
+        exit 1
+    fi
+
+    if [ $docci_bg_waited -ge $docci_bg_deadline ]; then
+        echo "{{LABEL}}: expected output never appeared after ${docci_bg_deadline}s" >&2
+        cat /tmp/docci_bg_{{INDEX}}.out >&2
+        exit 1
+    fi
+
+    docci_bg_waited=$((docci_bg_waited + 1))
+    sleep 1
+done
+
+`
+
 	// Regular block start marker
 	blockStartMarkerTemplate = `echo '### DOCCI_BLOCK_START_{{INDEX}} ###'
 `
@@ -177,7 +209,7 @@ while [ $retry_count -le $max_retries ]; do
 
   retry_count=$((retry_count + 1))
   if [ $retry_count -gt $max_retries ]; then
-    echo "{{LABEL}}: expected output never appeared after $max_retries attempts"
+    echo "{{LABEL}}: expected output never appeared after $max_retries attempts" >&2
     rm -f "$docci_capture_{{INDEX}}"
     exit 1
   fi

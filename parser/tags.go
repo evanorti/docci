@@ -538,9 +538,6 @@ func GetAllTagsInfo() []TagInfo {
 // Validate checks if the tag combinations are valid
 func (mt *MetaTag) Validate(lineNumber int) error {
 	// Validate tag combinations
-	if mt.OutputContains != "" && mt.Background {
-		return fmt.Errorf("line %d: Cannot use both output-contains and background on the same code block", lineNumber)
-	}
 	if mt.AssertFailure && mt.Background {
 		return fmt.Errorf("line %d: Cannot use both assert-failure and background on the same code block", lineNumber)
 	}
