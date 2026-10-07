@@ -1,0 +1,94 @@
+# Runs the docs that can be run, on the pull requests that change them.
+#
+# Copy into .github/workflows/ of the docs repository. Two things keep it cheap:
+# the path filter means it does not start at all for a pull request that touches
+# no pages, and select-pages.py narrows the matrix to the pages actually
+# affected rather than every page in the repo.
+#
+# "Affected" is wider than "changed": a page other pages declare in `needs` is
+# a prerequisite, so changing it runs them too.
+
+name: Docs run
+
+on:
+  pull_request:
+    paths:
+      - "docs/**/*.md"
+      - "docs/**/*.mdx"
+      - ".github/workflows/docs-run.yml"
+      - ".github/scripts/select-pages.py"
+
+# A new push supersedes the run in flight; these jobs are slow enough to matter.
+concurrency:
+  group: docs-run-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  select:
+    name: Select affected pages
+    runs-on: ubuntu-latest
+    outputs:
+      pages: ${{ steps.select.outputs.pages }}
+      any: ${{ steps.select.outputs.any }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # select-pages.py reads every page's frontmatter to find which ones
+          # depend on the changed ones, so it needs the whole tree.
+          fetch-depth: 0
+
+      - name: Install PyYAML
+        run: pip install --quiet pyyaml
+
+      - name: List changed pages
+        id: changed
+        run: |
+          git diff --name-only --diff-filter=d \
+            "origin/${{ github.base_ref }}...HEAD" \
+            -- 'docs/*.md' 'docs/*.mdx' > changed.txt
+          echo "changed pages:"; cat changed.txt
+          echo "count=$(wc -l < changed.txt)" >> "$GITHUB_OUTPUT"
+
+      - name: Select pages to run
+        id: select
+        run: |
+          PAGES=$(xargs -a changed.txt python3 .github/scripts/select-pages.py)
+          echo "pages=$PAGES" >> "$GITHUB_OUTPUT"
+          if [ "$PAGES" = "[]" ]; then
+            echo "any=false" >> "$GITHUB_OUTPUT"
+            echo "No runnable pages were affected."
+          else
+            echo "any=true" >> "$GITHUB_OUTPUT"
+            echo "Running: $PAGES"
+          fi
+
+  run:
+    name: ${{ matrix.page }}
+    needs: select
+    if: needs.select.outputs.any == 'true'
+    runs-on: ubuntu-latest
+    # One red page should not hide the others: a contributor wants every
+    # failure in one pass, not one per push.
+    continue-on-error: false
+    strategy:
+      fail-fast: false
+      matrix:
+        page: ${{ fromJSON(needs.select.outputs.pages) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Whatever the pages need in order to run. Replace with the real toolchain.
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+
+      # This repo IS docci, so it is built from source. A docs repo installs a
+      # release instead -- one new enough to read comment directives.
+      - name: Build docci
+        run: go build -o /usr/local/bin/docci .
+
+      - name: Run the page
+        run: docci run "${{ matrix.page }}" --hide-background-logs
