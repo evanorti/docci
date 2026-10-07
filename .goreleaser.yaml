@@ -1,7 +1,9 @@
 project_name: docci
 release:
   github:
-    owner: reecepbcups
+    # This fork publishes its own releases. `origin` still points at upstream,
+    # so goreleaser cannot infer the right repository from the remote.
+    owner: evanorti
     name: docci
   name_template: '{{.Tag}}'
 
