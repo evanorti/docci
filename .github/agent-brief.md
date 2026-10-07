@@ -97,7 +97,15 @@ nothing else.
 
 A second reviewer reads the whole page after you, judging whether the fix is
 correct, whether it is elegant, and whether the page still reads well. It sends
-work back for over-correction as readily as for a bad fix. The things it looks
+work back for over-correction as readily as for a bad fix.
+
+Minimal does not mean incomplete. If your edit makes a sentence wrong, that
+sentence is part of the fix. Renaming a field the prose names is the common
+case: the output block and every sentence naming that field move together, or
+the page now contradicts itself. Leaving it is under-correction, and it comes
+back to you just as padding does.
+
+The things it looks
 for, so you do not do them:
 
 - explanation added where none was missing
