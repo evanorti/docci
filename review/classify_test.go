@@ -139,3 +139,56 @@ func TestRenameWithChangedValueFallsThroughToReduction(t *testing.T) {
 	require.Equal(t, "reduction-load-bearing", verdict.Class)
 	require.Contains(t, verdict.Lost, "10")
 }
+
+// Probes from review: each was approved before and must now block. They are
+// written against the failure, not the fix.
+func classifyText(before, after, prose string) Verdict {
+	b := Assertion{Key: "k", Kind: "expect", Text: before}
+	a := Assertion{Key: "k", Kind: "expect", Text: after}
+	return Classify(Pair{Key: "k", Kind: "expect", Before: &b, After: &a}, prose)
+}
+
+func TestDeletedFieldBlocksEvenWhenItsValueSurvivesElsewhere(t *testing.T) {
+	v := classifyText(`{"ready":true,"healthy":true}`, `{"ready":true}`, "")
+	require.True(t, v.Blocking(), "%+v", v)
+}
+
+func TestDeletedDuplicateValueFieldBlocksWhenProseNamesIt(t *testing.T) {
+	v := classifyText(`{"a":"10","b":"10"}`, `{"a":"10"}`, "You should see 10.")
+	require.True(t, v.Blocking(), "%+v", v)
+}
+
+func TestDroppedRepeatedLineBlocks(t *testing.T) {
+	v := classifyText("ok\nok", "ok", "")
+	require.True(t, v.Blocking(), "%+v", v)
+}
+
+func TestTerminalStatesAreCaseInsensitive(t *testing.T) {
+	for _, word := range []string{"success", "Success", "OK", "failed", "succeeded", "error", "completed", "active", "True"} {
+		v := classifyText(`{"status":"`+word+`"}`, `{"status":"<...>"}`, "")
+		require.True(t, v.Blocking(), "%s: %+v", word, v)
+	}
+}
+
+func TestDroppedZeroCodeBlocks(t *testing.T) {
+	v := classifyText(`{"code": 0}`, `{"code": "<...>"}`, "")
+	require.True(t, v.Blocking(), "%+v", v)
+}
+
+func TestTypeURLAndRouteAreNotNoise(t *testing.T) {
+	for _, route := range []string{"/cosmos.bank.v1beta1.MsgSend", "/v1/status"} {
+		v := classifyText(`{"type":"`+route+`"}`, `{"type":"<...>"}`, "The type is "+route+".")
+		require.True(t, v.Blocking(), "%s: %+v", route, v)
+	}
+}
+
+func TestPartialHardcodingBlocks(t *testing.T) {
+	v := classifyText("$(a) $(b)", "$(a) 5", "")
+	require.Equal(t, "hardcoding", v.Class)
+}
+
+func TestRenameKeepsReasonAndStillPasses(t *testing.T) {
+	v := classifyText(`{"ready":true,"balance":"10"}`, `{"ready":true,"fee":"10"}`, "You should see 10.")
+	require.Equal(t, "re-expression", v.Class)
+	require.Contains(t, v.Reason, "balance -> fee")
+}

@@ -53,7 +53,8 @@ func TestWholeTimestampAndPathAreNotLoadBearing(t *testing.T) {
 func TestDigitInsideLargerNumberIsNotNamed(t *testing.T) {
 	require.False(t, LoadBearing("1", "You should see 100 tokens."))
 	require.False(t, LoadBearing("1", "The year is 2026."))
-	require.False(t, LoadBearing("ok", "Read the book."))
+	// "ok" is a terminal state now, so the substring check uses a neutral word.
+	require.False(t, LoadBearing("boo", "Read the book."))
 }
 
 func TestProseMatchIsCaseInsensitive(t *testing.T) {

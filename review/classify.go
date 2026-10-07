@@ -1,8 +1,11 @@
 package review
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
+	"sort"
 	"strings"
 )
 
@@ -53,28 +56,18 @@ func Classify(pair Pair, prose string) Verdict {
 		return verdict
 	}
 
-	if derivedPattern.MatchString(pair.Before.Text) && !derivedPattern.MatchString(pair.After.Text) {
+	// Any derived expression that became a literal is hardcoding, even when
+	// others survive: "$(a) $(b)" -> "$(a) 5" passes on one machine only.
+	if len(derivedPattern.FindAllString(pair.Before.Text, -1)) > len(derivedPattern.FindAllString(pair.After.Text, -1)) {
 		verdict.Class = "hardcoding"
 		verdict.Reason = "a derived value was replaced with a literal, which passes on one machine and breaks for every reader"
 		return verdict
 	}
 
-	kept := make(map[string]bool)
-	for _, literal := range Literals(pair.After.Text) {
-		kept[literal] = true
-	}
+	lost, renames := lostLiterals(pair.Before.Text, pair.After.Text)
 
-	// A renamed field is a change of shape, not of what is pinned: the value
-	// beside it is still compared. Losing a key therefore never counts by
-	// itself; a deleted field still loses its value, which does.
-	keys := fieldNames(pair.Before.Text)
-
-	var lost, lostLoadBearing []string
-	for _, literal := range Literals(pair.Before.Text) {
-		if kept[literal] || keys[literal] {
-			continue
-		}
-		lost = append(lost, literal)
+	var lostLoadBearing []string
+	for _, literal := range lost {
 		if LoadBearing(literal, prose) {
 			lostLoadBearing = append(lostLoadBearing, literal)
 		}
@@ -94,52 +87,165 @@ func Classify(pair Pair, prose string) Verdict {
 		verdict.Reason = "the assertion pins the same facts in a new shape"
 		// Said aloud because the diff cannot tell an upstream rename from a
 		// check that quietly moved to a different field than the prose names.
-		if renames := renamedKeys(pair.Before.Text, pair.After.Text); renames != "" {
-			verdict.Reason = "the assertion pins the same values under renamed keys: " + renames
+		if len(renames) > 0 {
+			verdict.Reason = "the assertion pins the same values under renamed keys: " + strings.Join(renames, ", ")
 		}
 	}
 
 	return verdict
 }
 
-// fieldPattern matches a quoted JSON key.
-var fieldPattern = regexp.MustCompile(`"([^"]+)"\s*:`)
+// fieldValuePattern is the fallback for key/value text that is not valid JSON.
+var fieldValuePattern = regexp.MustCompile(`"([^"]+)"\s*:\s*("(?:[^"\\]|\\.)*"|[^\s,}\]]+)`)
 
-func fieldNames(text string) map[string]bool {
-	names := make(map[string]bool)
-	for _, match := range fieldPattern.FindAllStringSubmatch(text, -1) {
-		names[match[1]] = true
+// fields reads key/value content into path -> value, or reports false when the
+// text has none. Comparing keys one by one, not as a bag of literals, is what
+// stops a value surviving under one key from excusing its deletion under
+// another.
+func fields(text string) (map[string]string, bool) {
+	decoder := json.NewDecoder(strings.NewReader(text))
+	decoder.UseNumber()
+	var parsed any
+	if err := decoder.Decode(&parsed); err == nil {
+		switch parsed.(type) {
+		case map[string]any, []any:
+			out := make(map[string]string)
+			flatten("", parsed, out)
+			return out, true
+		}
 	}
-	return names
+
+	matches := fieldValuePattern.FindAllStringSubmatch(text, -1)
+	if len(matches) == 0 {
+		return nil, false
+	}
+	out := make(map[string]string)
+	for _, m := range matches {
+		key := m[1]
+		for n := 2; ; n++ {
+			if _, taken := out[key]; !taken {
+				break
+			}
+			key = fmt.Sprintf("%s#%d", m[1], n)
+		}
+		out[key] = strings.Trim(m[2], `"`)
+	}
+	return out, true
 }
 
-// renamedKeys lists keys present only before and only after, in order, paired
-// by position: "balance -> fee". It is empty when no key changed.
-func renamedKeys(before, after string) string {
-	oldKeys, newKeys := fieldNames(before), fieldNames(after)
-	var gone, added []string
-	for _, m := range fieldPattern.FindAllStringSubmatch(before, -1) {
-		if !newKeys[m[1]] {
-			gone = append(gone, m[1])
+func flatten(path string, value any, out map[string]string) {
+	switch v := value.(type) {
+	case map[string]any:
+		for key, child := range v {
+			flatten(path+"."+key, child, out)
+		}
+	case []any:
+		for i, child := range v {
+			flatten(fmt.Sprintf("%s[%d]", path, i), child, out)
+		}
+	case nil:
+		out[path] = "null"
+	case json.Number:
+		out[path] = v.String()
+	default:
+		out[path] = fmt.Sprint(v)
+	}
+}
+
+// lostLiterals returns what the edit stopped pinning, and any key renames that
+// kept their value. A key present before and absent after is lost whatever the
+// other keys hold, unless a new key took over its exact value.
+func lostLiterals(before, after string) (lost []string, renames []string) {
+	oldFields, oldOK := fields(before)
+	newFields, newOK := fields(after)
+	if !oldOK || !newOK {
+		return lostTokens(before, after), nil
+	}
+
+	var removed, added, changed []string
+	for key, value := range oldFields {
+		if newValue, ok := newFields[key]; !ok {
+			removed = append(removed, key)
+		} else if normalize(newValue) != normalize(value) {
+			changed = append(changed, key)
 		}
 	}
-	for _, m := range fieldPattern.FindAllStringSubmatch(after, -1) {
-		if !oldKeys[m[1]] {
-			added = append(added, m[1])
+	for key := range newFields {
+		if _, ok := oldFields[key]; !ok {
+			added = append(added, key)
 		}
 	}
-	var parts []string
-	for i := 0; i < len(gone) || i < len(added); i++ {
-		from, to := "(none)", "(none)"
-		if i < len(gone) {
-			from = gone[i]
+	// Maps iterate randomly; sorted keeps verdicts and reasons stable.
+	sort.Strings(removed)
+	sort.Strings(added)
+	sort.Strings(changed)
+
+	claimed := make(map[string]bool)
+	for _, key := range removed {
+		renamed := false
+		for _, candidate := range added {
+			if !claimed[candidate] && normalize(newFields[candidate]) == normalize(oldFields[key]) {
+				claimed[candidate] = true
+				renames = append(renames, lastSegment(key)+" -> "+lastSegment(candidate))
+				renamed = true
+				break
+			}
 		}
-		if i < len(added) {
-			to = added[i]
+		if !renamed {
+			lost = appendUnique(lost, lastSegment(key))
+			lost = appendUnique(lost, Literals(oldFields[key])...)
 		}
-		parts = append(parts, from+" -> "+to)
 	}
-	return strings.Join(parts, ", ")
+
+	for _, key := range changed {
+		kept := make(map[string]bool)
+		for _, literal := range Literals(newFields[key]) {
+			kept[literal] = true
+		}
+		for _, literal := range Literals(oldFields[key]) {
+			if !kept[literal] {
+				lost = appendUnique(lost, literal)
+			}
+		}
+	}
+	return lost, renames
+}
+
+// lostTokens compares line-oriented output as a multiset, so a repeated line
+// dropped to one copy is a loss even though the word is still present.
+func lostTokens(before, after string) []string {
+	remaining := make(map[string]int)
+	for _, token := range tokenize(after) {
+		remaining[token]++
+	}
+	var lost []string
+	for _, token := range tokenize(before) {
+		if remaining[token] > 0 {
+			remaining[token]--
+			continue
+		}
+		lost = appendUnique(lost, token)
+	}
+	return lost
+}
+
+func lastSegment(path string) string {
+	if i := strings.LastIndex(path, "."); i >= 0 {
+		path = path[i+1:]
+	}
+	if i := strings.Index(path, "#"); i >= 0 {
+		path = path[:i]
+	}
+	return path
+}
+
+func appendUnique(list []string, items ...string) []string {
+	for _, item := range items {
+		if item != "" && !slices.Contains(list, item) {
+			list = append(list, item)
+		}
+	}
+	return list
 }
 
 var (

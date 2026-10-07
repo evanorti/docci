@@ -9,20 +9,22 @@ import (
 // whether a step worked. They are never load-bearing, even when the prose
 // happens to mention them.
 var noisePatterns = []*regexp.Regexp{
-	regexp.MustCompile(`^\d{1,2}:\d{2}:\d{2}$`),   // 12:34:56
-	regexp.MustCompile(`^\d{4}-\d{2}-\d{2}`),      // 2026-10-07...
-	regexp.MustCompile(`^\d+(\.\d+)?(ms|s|m|h)$`), // 1m4s, 250ms
-	regexp.MustCompile(`^\d+[hms]\d+[ms]$`),       // 1m4s split form
-	regexp.MustCompile(`^(/|~/)[^\s]*$`),          // absolute paths
-	regexp.MustCompile(`^0x[0-9a-fA-F]{40,}$`),    // addresses and hashes
+	regexp.MustCompile(`^\d{1,2}:\d{2}:\d{2}$`),                   // 12:34:56
+	regexp.MustCompile(`^\d{4}-\d{2}-\d{2}`),                      // 2026-10-07...
+	regexp.MustCompile(`^\d+(\.\d+)?(ms|s|m|h)$`),                 // 1m4s, 250ms
+	regexp.MustCompile(`^\d+[hms]\d+[ms]$`),                       // 1m4s split form
+	regexp.MustCompile(`^(~/|/home/|/Users/|/tmp/|/var/)[^\s]*$`), // filesystem paths, not type URLs or API routes
+	regexp.MustCompile(`^0x[0-9a-fA-F]{40,}$`),                    // addresses and hashes
 }
 
 // terminalStates are values whose whole purpose is to say a step succeeded or
 // failed. Losing one means losing the page's ability to tell the difference.
 var terminalStates = map[string]bool{
 	"true": true, "false": true, "null": true,
-	"SUCCEEDED": true, "FAILED": true, "PENDING": true,
-	"valid": true, "invalid": true, "ready": true, "healthy": true,
+	"pending": true,
+	"valid":   true, "invalid": true, "ready": true, "healthy": true,
+	"success": true, "ok": true, "failed": true, "succeeded": true,
+	"error": true, "completed": true, "active": true, "0": true,
 }
 
 // wildcard is docci's placeholder for output that varies; it asserts nothing.
@@ -80,7 +82,8 @@ func LoadBearing(literal string, prose string) bool {
 		}
 	}
 
-	if terminalStates[literal] {
+	// Case-insensitive to match the prose side: tutorials print "Success".
+	if terminalStates[strings.ToLower(literal)] {
 		return true
 	}
 
