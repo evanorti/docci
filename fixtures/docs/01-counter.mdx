@@ -1,0 +1,60 @@
+---
+title: "Check a balance"
+description: "Build the toy CLI and read a balance from it."
+---
+
+By the end of this page the toy CLI is built and you have read a balance from
+it. You need Go installed; nothing else.
+
+## Build the CLI
+
+The CLI is a single Go file, so one build command produces the `toy` binary.
+
+{/* docci name="build the toy cli" */}
+
+```bash
+go build -o toy ./toy-cli
+```
+
+## Check the status
+
+A run is finished once the state is `SUCCEEDED`. The block number changes every
+run, so the page shows a placeholder for it.
+
+{/* docci name="status reaches a terminal state" */}
+
+```bash
+./toy status
+```
+
+{/* docci expect-output */}
+
+```json
+{"state": "SUCCEEDED", "height": "<...>"}
+```
+
+If the state is anything other than `SUCCEEDED`, the run did not complete.
+
+## Read the balance
+
+You should see 10 DEMO.
+
+{/* docci name="balance reads ten" */}
+
+```bash
+./toy balance
+```
+
+{/* docci expect-output */}
+
+```json
+{"balance": "10", "symbol": "DEMO"}
+```
+
+## Clean up
+
+Remove the binary you built.
+
+```bash
+rm toy
+```
