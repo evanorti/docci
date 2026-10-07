@@ -18,13 +18,20 @@ type Pair struct {
 // reporting "no reductions found" for a page nobody could compare reads as
 // approval, which is the one answer that must never be wrong.
 //
-// Only named assertions are judged. An unnamed assertion's key is its ordinal,
-// and an ordinal cannot tell an edited assertion from a different one that took
-// its place. So if the unnamed assertions differ at all between the versions,
-// the page is refused and the author is asked to name them.
+// Only named assertions are judged. An unnamed assertion's identity is its
+// ordinal, and an ordinal cannot tell an edited assertion from a different one
+// that took its place. So if the unnamed assertions differ at all between the
+// versions, the page is refused and the author is asked to name them.
 func PairAssertions(before, after []Assertion) ([]Pair, error) {
 	if len(before) == 0 {
 		return nil, fmt.Errorf("cannot compare: the base version of this page asserts nothing")
+	}
+
+	if err := checkIdentified(before, "base"); err != nil {
+		return nil, err
+	}
+	if err := checkIdentified(after, "head"); err != nil {
+		return nil, err
 	}
 
 	if err := checkUnnamedUnchanged(before, after); err != nil {
@@ -58,12 +65,29 @@ func PairAssertions(before, after []Assertion) ([]Pair, error) {
 	return pairs, nil
 }
 
+// checkIdentified refuses an assertion that did not come from Extract or
+// NamedAssertion. Such a value has a zero identity, which would otherwise be
+// read as something to pair by accident.
+func checkIdentified(assertions []Assertion, side string) error {
+	for _, assertion := range assertions {
+		if !assertion.identity.valid() {
+			return fmt.Errorf("cannot compare: assertion %q in the %s version has no identity; build it with Extract or NamedAssertion", assertion.Key, side)
+		}
+	}
+	return nil
+}
+
 // pairID identifies an assertion across versions. Kind is part of the
 // identity because one block can assert both ways and both assertions share a
-// Key. The NUL separator cannot appear in a block name, so a Key and Kind
-// pair can never collide with a different pair.
+// name. The identity's token is part of it because an unnamed assertion's
+// identity is an ordinal, and an ordinal can equal a name a human chose: a
+// block named "assertion #1" must never be paired with an unnamed assertion
+// keyed "assertion #1". The identity has to be sound on its own. The sequence
+// check in checkUnnamedUnchanged is a second line of defence, not the first.
+// The NUL separator cannot appear in a block name, so the parts cannot run
+// together.
 func pairID(assertion Assertion) string {
-	return assertion.Key + "\x00" + assertion.Kind
+	return assertion.identity.token() + "\x00" + assertion.Kind
 }
 
 // indexAssertions maps each assertion's pairID to the assertion. A repeated
@@ -84,8 +108,8 @@ func indexAssertions(assertions []Assertion, side string) (map[string]Assertion,
 // checkUnnamedUnchanged refuses unless the unnamed assertions match in order,
 // by kind and text, across the two versions. Comparing counts is not enough.
 // Replacing one unnamed assertion and appending another leaves the count
-// unchanged, and the ordinal keys then pair the old assertion with the wrong
-// one without any error.
+// unchanged, and the ordinal identities then pair the old assertion with the
+// wrong one without any error.
 func checkUnnamedUnchanged(before, after []Assertion) error {
 	beforeUnnamed := unnamedInOrder(before)
 	afterUnnamed := unnamedInOrder(after)
@@ -104,7 +128,7 @@ func checkUnnamedUnchanged(before, after []Assertion) error {
 func unnamedInOrder(assertions []Assertion) []Assertion {
 	var unnamed []Assertion
 	for _, assertion := range assertions {
-		if !assertion.Named {
+		if !assertion.Named() {
 			unnamed = append(unnamed, assertion)
 		}
 	}

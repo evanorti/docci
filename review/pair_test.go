@@ -8,8 +8,8 @@ import (
 )
 
 func TestPairMatchesByKeyAndKind(t *testing.T) {
-	before := []Assertion{{Key: "mint", Named: true, Kind: "contains", Text: "executed"}}
-	after := []Assertion{{Key: "mint", Named: true, Kind: "contains", Text: "txHash"}}
+	before := []Assertion{NamedAssertion("mint", "contains", "executed")}
+	after := []Assertion{NamedAssertion("mint", "contains", "txHash")}
 
 	pairs, err := PairAssertions(before, after)
 	require.NoError(t, err)
@@ -20,7 +20,7 @@ func TestPairMatchesByKeyAndKind(t *testing.T) {
 
 // A deleted assertion is the largest possible reduction, not an absent pair.
 func TestPairKeepsDeletedAssertions(t *testing.T) {
-	before := []Assertion{{Key: "balance", Named: true, Kind: "expect", Text: "{\"balance\": \"10\"}"}}
+	before := []Assertion{NamedAssertion("balance", "expect", "{\"balance\": \"10\"}")}
 
 	pairs, err := PairAssertions(before, nil)
 	require.NoError(t, err)
@@ -32,8 +32,8 @@ func TestPairKeepsDeletedAssertions(t *testing.T) {
 // Ambiguous keys must refuse rather than pair arbitrarily.
 func TestPairRefusesDuplicateKeys(t *testing.T) {
 	before := []Assertion{
-		{Key: "check", Kind: "contains", Text: "a"},
-		{Key: "check", Kind: "contains", Text: "b"},
+		NamedAssertion("check", "contains", "a"),
+		NamedAssertion("check", "contains", "b"),
 	}
 
 	_, err := PairAssertions(before, before)
@@ -43,7 +43,7 @@ func TestPairRefusesDuplicateKeys(t *testing.T) {
 
 // A page with no assertions on one side cannot be compared.
 func TestPairRefusesWhenBeforeIsEmpty(t *testing.T) {
-	after := []Assertion{{Key: "check", Kind: "contains", Text: "a"}}
+	after := []Assertion{NamedAssertion("check", "contains", "a")}
 
 	_, err := PairAssertions(nil, after)
 	require.Error(t, err)
@@ -210,7 +210,7 @@ func TestPairNamedEditWithUnnamedUnchangedPairs(t *testing.T) {
 	require.Equal(t, "executed", mint.Before.Text)
 	require.Equal(t, "txHash", mint.After.Text)
 
-	unnamedPair := byKey["assertion #2/expect"]
+	unnamedPair := byKey["assertion #1/expect"]
 	require.NotNil(t, unnamedPair.Before, "the unchanged unnamed assertion should still pair")
 	require.NotNil(t, unnamedPair.After)
 }
@@ -267,7 +267,7 @@ func TestNamedAssertionLookingLikeOrdinalIsNamed(t *testing.T) {
 
 	before, err := Extract(base, "page.md")
 	require.NoError(t, err)
-	require.True(t, before[0].Named, "a block named by the author is named, whatever its name looks like")
+	require.True(t, before[0].Named(), "a block named by the author is named, whatever its name looks like")
 	require.Equal(t, "assertion #3", before[0].Key)
 
 	after, err := Extract(head, "page.md")
@@ -283,4 +283,149 @@ func TestNamedAssertionLookingLikeOrdinalIsNamed(t *testing.T) {
 		}
 	}
 	t.Fatal("the named assertion did not pair")
+}
+
+// A named assertion inserted above unnamed ones must not renumber them. The
+// unnamed sequence is unchanged, so the sequence check passes, and the ordinals
+// are the only thing left to keep A and B on their own counterparts. The
+// ordinal therefore counts unnamed assertions only.
+func TestPairNamedInsertionAboveUnnamedKeepsThemPaired(t *testing.T) {
+	a := unnamedExpectBlock("cat a.txt", "{\"a\": \"1\"}")
+	b := unnamedExpectBlock("cat b.txt", "{\"b\": \"2\"}")
+	inserted := namedBlock("mint", "executed")
+
+	base := strings.Join(append(append([]string{"Intro.", ""}, a...), append([]string{""}, b...)...), "\n")
+	head := strings.Join(append(append(append([]string{"Intro.", ""}, inserted...), ""), append(append(a, ""), b...)...), "\n")
+
+	before, err := Extract(base, "page.md")
+	require.NoError(t, err)
+	after, err := Extract(head, "page.md")
+	require.NoError(t, err)
+	require.Len(t, before, 2)
+	require.Len(t, after, 3)
+
+	pairs, err := PairAssertions(before, after)
+	require.NoError(t, err)
+
+	byKey := map[string]Pair{}
+	for _, pair := range pairs {
+		byKey[pair.Key] = pair
+	}
+	for _, key := range []string{"assertion #1", "assertion #2"} {
+		pair, ok := byKey[key]
+		require.True(t, ok, key)
+		require.NotNil(t, pair.Before, key)
+		require.NotNil(t, pair.After, key)
+		require.Equal(t, pair.Before.Text, pair.After.Text, "%s must pair with its own counterpart", key)
+	}
+	require.Nil(t, byKey["mint"].Before, "the inserted named assertion is new, not a reduction")
+}
+
+// A block a human named "assertion #1" and an unnamed assertion whose ordinal
+// is also "assertion #1" share a Key. They are different assertions, so
+// pairing must keep them apart. The identity includes Named so that this holds
+// on its own, without depending on the sequence check.
+func TestPairNamedAndOrdinalKeysDoNotCollide(t *testing.T) {
+	// Both are "contains" assertions, so Kind cannot tell them apart and only
+	// Named can.
+	page := strings.Join([]string{
+		"<!-- docci name=\"assertion #1\" output-contains=\"executed\" -->",
+		"",
+		"```bash",
+		"mint-token",
+		"```",
+		"",
+		"<!-- docci output-contains=\"ready\" -->",
+		"",
+		"```bash",
+		"cat counter.txt",
+		"```",
+	}, "\n")
+
+	before, err := Extract(page, "page.md")
+	require.NoError(t, err)
+	require.Len(t, before, 2)
+	require.Equal(t, before[0].Key, before[1].Key, "the collision this test depends on")
+	require.Equal(t, before[0].Kind, before[1].Kind, "the collision must not be separated by Kind")
+	require.NotEqual(t, before[0].Named(), before[1].Named())
+
+	after, err := Extract(page, "page.md")
+	require.NoError(t, err)
+
+	pairs, err := PairAssertions(before, after)
+	require.NoError(t, err, "two distinct assertions must not be refused as duplicates")
+	require.Len(t, pairs, 2)
+	for _, pair := range pairs {
+		require.NotNil(t, pair.Before)
+		require.NotNil(t, pair.After)
+		require.Equal(t, pair.Before.Named(), pair.After.Named())
+	}
+}
+
+// A hand-built Assertion has a zero identity. It must be refused, not read as
+// an unnamed assertion. Before identity was made constructor-only, a struct
+// literal with no Named field was exactly that.
+func TestPairRefusesHandBuiltAssertionWithNoIdentity(t *testing.T) {
+	handBuilt := []Assertion{{Key: "mint", Kind: "contains", Text: "executed"}}
+	extracted := []Assertion{NamedAssertion("mint", "contains", "executed")}
+
+	_, err := PairAssertions(extracted, handBuilt)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "has no identity")
+
+	_, err = PairAssertions(handBuilt, extracted)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "has no identity")
+}
+
+// Regression for the fifth route, found by the property test (seed 347). Under
+// a heading "assertion #1", an unnamed block asserts both ways. The block is
+// removed, and a block named "assertion #1" is inserted under the same heading.
+// The name and the heading are different sources, so no pair may join the two
+// blocks, even though both keys read "assertion #1". Before the identity
+// carried its source, the guard paired them.
+func TestPairNameAndHeadingWithSameTextDoNotJoin(t *testing.T) {
+	base := strings.Join([]string{
+		"## assertion #1",
+		"",
+		"<!-- docci output-contains=\"out-5-0\" -->",
+		"",
+		"```bash",
+		"echo block-5",
+		"```",
+		"",
+		"<!-- docci expect-output -->",
+		"",
+		"```json",
+		"{\"id\": 5, \"v\": 0}",
+		"```",
+	}, "\n")
+	head := strings.Join([]string{
+		"## assertion #1",
+		"",
+		"<!-- docci name=\"assertion #1\" -->",
+		"",
+		"```bash",
+		"echo block-6",
+		"```",
+		"",
+		"<!-- docci expect-output -->",
+		"",
+		"```json",
+		"{\"id\": 6, \"v\": 0}",
+		"```",
+	}, "\n")
+
+	before, err := Extract(base, "page.md")
+	require.NoError(t, err)
+	after, err := Extract(head, "page.md")
+	require.NoError(t, err)
+
+	pairs, err := PairAssertions(before, after)
+	require.NoError(t, err)
+	for _, pair := range pairs {
+		require.False(t, pair.Before != nil && pair.After != nil,
+			"%s/%s joins the base block to a different head block", pair.Key, pair.Kind)
+	}
+	require.Len(t, pairs, 3, "the removed block gives two one-sided pairs (contains and expect), and the new named block one more")
 }
