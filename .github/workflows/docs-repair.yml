@@ -1,0 +1,79 @@
+# Repairs a tutorial that docs-run found broken.
+#
+# Triggers only on workflow_run. A repair job reachable from a pull_request
+# event would run attacker-controlled page content with a write token the
+# moment someone opened a pull request from a fork. workflow_run runs the base
+# repository's workflow definition, with secrets, after the untrusted job has
+# already finished.
+#
+# Do not add pull_request or pull_request_target to the triggers below.
+
+name: Docs repair
+
+on:
+  workflow_run:
+    workflows: ["Docs run"]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  # A fork's failing run is declined in a job of its own, so that no later step
+  # can be reached from it. (A step that merely exits 0 would not stop the
+  # steps after it.)
+  decline-fork:
+    if: >-
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.head_repository.full_name != github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Decline untrusted head
+        run: |
+          {
+            echo "### Repair skipped"
+            echo "The failing run came from a fork. A fix for a fork's pull request is the author's to make."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  repair:
+    if: >-
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      # Same-repository branch only: the job-level condition above guarantees it.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_branch }}
+          fetch-depth: 0
+
+      - name: Download failure records
+        uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          pattern: failure-record-*
+          path: failure/
+          merge-multiple: true
+
+      - name: Summarise what failed
+        run: |
+          for record in failure/*.json; do
+            python3 - "$record" >> "$GITHUB_STEP_SUMMARY" <<'PY'
+          import json, sys
+          record = json.load(open(sys.argv[1]))
+          failures = record.get("failures") or []
+          if not failures and record.get("step"):
+              failures = [{k: record[k] for k in ("step", "expected", "actual")}]
+          omitted = record.get("failures_omitted", 0)
+          print(f"### {record['page']}")
+          print(f"{len(failures)} failure(s) recorded" + (f", {omitted} more not shown" if omitted else "") + ".\n")
+          for i, f in enumerate(failures, 1):
+              print(f"#### {i}. {f['step']}\n")
+              print("**Expected**\n```\n" + f["expected"] + "\n```\n")
+              print("**Actual**\n```\n" + f["actual"] + "\n```\n")
+          if omitted:
+              print(f"_{omitted} further failure(s) omitted from the record; see the failing run's log._")
+          PY
+          done
