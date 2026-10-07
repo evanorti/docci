@@ -114,7 +114,7 @@ def test_three_failures_each_recorded():
 def test_mixed_failure_shapes():
     record = build(_failure_section([("match", "one"), ("contains", "two"), ("match", "three")]))
     f = record["failures"]
-    assert f[1] == {"step": "two", "expected": 'output contains "c1"', "actual": "a1"}
+    assert f[1] == {"kind": "validation", "step": "two", "expected": 'output contains "c1"', "actual": "a1"}
     assert f[0]["expected"] == "e0\nline2" and f[2]["actual"] == "a2\nmore"
 
 
@@ -123,3 +123,71 @@ def test_failure_list_is_capped_and_omitted_counted():
     assert len(record["failures"]) == 10
     assert record["failures"][9]["step"] == "s9"
     assert record["failures_omitted"] == 15
+
+
+# Real shape of a command failure (ANSI stripped by the script): no validation
+# section, DEBUG-trap duplicates, docci bookkeeping commands.
+COMMAND_FAIL = (
+    "\x1b[34mINFO\x1b[0m(17:07:22) running docci file=/t/01.mdx\n"
+    "     Executing CMD: go build -o toy ./toy-cli\n"
+    "     Executing CMD: trap - DEBUG\n"
+    "     Executing CMD: ./toy status\n"
+    '{"state": "SUCCEEDED", "height": "12"}\n'
+    "     Executing CMD: trap - DEBUG\n"
+    "     Executing CMD: ./toy balance\n"
+    'unknown command "balance"\n'
+    "     Executing CMD: ./toy balance\n"
+    "     Executing CMD: ./toy balance\n"
+    "     Executing CMD: jobs -p\n"
+    "     Executing CMD: xargs -r kill 2> /dev/null\n"
+    "\x1b[31mERROR\x1b[0m(17:07:23) Unexpected script execution failure error=exit status 1\n"
+    "\x1b[31mERROR\x1b[0m(17:07:23) Command failed exitCode=1\n"
+)
+
+
+def test_command_failure_is_recorded():
+    record = build(COMMAND_FAIL)
+    assert record["kind"] == "command"
+    assert record["step"] == "./toy balance"  # not xargs/jobs/trap
+    assert record["expected"] == "the command to exit 0"
+    assert record["actual"] == 'unknown command "balance"'  # not the earlier ./toy status output
+    assert record["failures"] == [{"kind": "command", "step": "./toy balance",
+                                   "expected": "the command to exit 0",
+                                   "actual": 'unknown command "balance"', "exit_code": 1}]
+
+
+def test_command_failure_exit_status_is_read_from_the_log():
+    record = build(COMMAND_FAIL.replace("exit status 1", "exit status 127"))
+    assert record["failures"][0]["exit_code"] == 127
+
+
+def test_repeated_command_is_one_occurrence_and_keeps_all_output():
+    log = ("     Executing CMD: ./toy x\nfirst\n     Executing CMD: ./toy x\nsecond\n"
+           "     Executing CMD: ./toy x\n"
+           "ERROR(1:1:1) Unexpected script execution failure error=exit status 2\n")
+    assert build(log)["actual"] == "first\nsecond"
+    # a different command in between ends the run
+    log2 = ("     Executing CMD: ./toy x\nold\n     Executing CMD: ./toy y\nnew\n"
+            "     Executing CMD: ./toy x\n"
+            "ERROR(1:1:1) Unexpected script execution failure error=exit status 2\n")
+    r = build(log2)
+    assert r["step"] == "./toy x" and r["actual"] == ""
+
+
+def test_command_failure_plus_validation_failures():
+    log = COMMAND_FAIL + _failure_section([("match", "one"), ("contains", "two")])
+    record = build(log)
+    assert [f["kind"] for f in record["failures"]] == ["command", "validation", "validation"]
+    assert [f["step"] for f in record["failures"]] == ["./toy balance", "one", "two"]
+    assert record["kind"] == "command" and record["step"] == "./toy balance"
+    assert record["failures"][1]["expected"] == "e0\nline2"
+    assert record["failures_omitted"] == 0
+
+
+def test_validation_only_logs_have_no_command_failure():
+    record = build(REAL)
+    assert record["kind"] == "validation"
+    assert [f["kind"] for f in record["failures"]] == ["validation"]
+    # successful commands in the log must not be mistaken for a failure
+    ok = build("     Executing CMD: ./toy a\nout\n")
+    assert ok["failures"] == [] and ok["kind"] == ""
