@@ -90,5 +90,39 @@ jobs:
       - name: Build docci
         run: go build -o /usr/local/bin/docci .
 
+      # The output is kept so a failure record can be built from the run that
+      # actually failed. Running the page a second time would cost minutes on a
+      # chain tutorial, and an intermittent page could pass the second time and
+      # leave an empty record for a failure that really happened. No pipefail
+      # here (the default shell has none), so the exit status is docci's own,
+      # read from PIPESTATUS rather than tee's.
       - name: Run the page
-        run: docci run "${{ matrix.page }}" --hide-background-logs
+        env:
+          PAGE: ${{ matrix.page }}
+        run: |
+          docci run "$PAGE" --hide-background-logs 2>&1 | tee docci.log
+          exit "${PIPESTATUS[0]}"
+
+      # Reads docci.log; it never runs the page. Needs only contents: read.
+      - name: Build failure record
+        if: failure()
+        env:
+          PAGE: ${{ matrix.page }}
+          BASE_COMMIT: ${{ github.event.pull_request.base.sha || github.sha }}
+          TRIGGER: ${{ github.event_name == 'schedule' && 'schedule' || 'pull_request' }}
+        run: |
+          mkdir -p failure
+          python3 .github/scripts/failure-record.py \
+              --page "$PAGE" \
+              --base-commit "$BASE_COMMIT" \
+              --trigger "$TRIGGER" \
+              < docci.log \
+            > "failure/$(echo "$PAGE" | tr '/' '-').json"
+
+      - name: Upload failure record
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-record-${{ strategy.job-index }}
+          path: failure/
+          retention-days: 30
