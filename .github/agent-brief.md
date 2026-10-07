@@ -134,5 +134,5 @@ all attempts and what each failed on.
 Every report carries the page and step, expected versus actual, what you tried,
 and your best attribution for the cause.
 
-Commit messages and the pull request body are plain descriptions of the change.
+The pull request body is a plain description of the change.
 No attribution footers, and no mention of Claude or any tool that wrote them.
