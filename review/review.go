@@ -18,6 +18,11 @@ type Assertion struct {
 	// unchanged assertion look removed.
 	Key string
 
+	// Named is true when Key came from the author: the block's name, its step
+	// title or its heading. It is false when Key fell back to an ordinal. Only
+	// named assertions can be tracked across versions; see PairAssertions.
+	Named bool
+
 	// Kind is "contains" for a hidden tripwire or "expect" for a rendered
 	// checkpoint.
 	Kind string
@@ -39,16 +44,16 @@ func Extract(document, path string) ([]Assertion, error) {
 
 	var assertions []Assertion
 	for _, block := range blocks {
-		key := assertionKey(block, len(assertions)+1)
+		key, named := assertionKey(block, len(assertions)+1)
 
 		if block.OutputContains != "" {
 			assertions = append(assertions, Assertion{
-				Key: key, Kind: "contains", Text: block.OutputContains, Line: block.LineNumber,
+				Key: key, Named: named, Kind: "contains", Text: block.OutputContains, Line: block.LineNumber,
 			})
 		}
 		if block.ExpectOutput != "" {
 			assertions = append(assertions, Assertion{
-				Key: key, Kind: "expect", Text: block.ExpectOutput, Line: block.LineNumber,
+				Key: key, Named: named, Kind: "expect", Text: block.ExpectOutput, Line: block.LineNumber,
 			})
 		}
 	}
@@ -56,18 +61,19 @@ func Extract(document, path string) ([]Assertion, error) {
 	return assertions, nil
 }
 
-// assertionKey names an assertion the way a human would refer to it. The
-// ordinal is the number of assertions up to and including this one, which
-// keeps an unnamed assertion's key stable when unrelated content moves above it.
-func assertionKey(block parser.CodeBlock, ordinal int) string {
+// assertionKey names an assertion the way a human would refer to it, and
+// reports whether the author supplied that name. The ordinal is the number of
+// assertions up to and including this one, which keeps an unnamed assertion's
+// key stable when unrelated content moves above it.
+func assertionKey(block parser.CodeBlock, ordinal int) (string, bool) {
 	switch {
 	case block.Name != "":
-		return block.Name
+		return block.Name, true
 	case block.StepTitle != "":
-		return block.StepTitle
+		return block.StepTitle, true
 	case block.Heading != "":
-		return block.Heading
+		return block.Heading, true
 	default:
-		return fmt.Sprintf("assertion #%d", ordinal)
+		return fmt.Sprintf("assertion #%d", ordinal), false
 	}
 }
