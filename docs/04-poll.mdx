@@ -1,0 +1,39 @@
+---
+title: "Wait for a state to change"
+docci:
+  cleanup:
+    - rm -f attempts.txt
+---
+
+Some steps report a pending state for a while before they succeed. The command
+exits cleanly the whole time, so the page has to wait for the output, not for
+the exit code.
+
+{/* docci name="reset the counter" */}
+
+```bash
+rm -f attempts.txt && echo 0 > attempts.txt
+```
+
+## Check the transfer
+
+{/* docci
+  name="transfer reaches a terminal state"
+  retry=5
+  delay-per-cmd=0.1
+*/}
+
+```bash
+COUNT=$(( $(cat attempts.txt) + 1 ))
+echo "$COUNT" > attempts.txt
+if [ "$COUNT" -ge 3 ]; then STATE=SUCCEEDED; else STATE=PENDING; fi
+echo "{\"state\": \"PACKET_STATE_$STATE\", \"sequenceNumber\": \"$COUNT\"}"
+```
+
+It reads `PACKET_STATE_PENDING` for a while, then:
+
+{/* docci expect-output */}
+
+```json
+{"state": "PACKET_STATE_SUCCEEDED", "sequenceNumber": "<...>"}
+```
