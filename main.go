@@ -10,6 +10,7 @@ import (
 
 	"github.com/reecepbcups/docci/logger"
 	"github.com/reecepbcups/docci/parser"
+	"github.com/reecepbcups/docci/review"
 	"github.com/reecepbcups/docci/types"
 	"github.com/spf13/cobra"
 )
@@ -343,6 +344,50 @@ var tagsCmd = &cobra.Command{
 	},
 }
 
+// reviewCmd is what CI runs after an agent edits a page, outside the agent's
+// control, so a page cannot be made green by claiming less than it did.
+var reviewCmd = &cobra.Command{
+	Use:   "review <base-page> <head-page>",
+	Short: "Check whether an edit weakened a page's assertions",
+	Long: `Compares the assertions on two versions of a page.
+
+Exits 0 when every change preserves what the page could catch, and 2 when a
+change removes a load-bearing value or replaces a derived value with a literal.
+Exit code 1 means the pages could not be compared.`,
+	Args: cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		// An error here is "could not compare" and must exit 1, never 0.
+		cmd.SilenceUsage = true
+
+		beforeDoc, err := os.ReadFile(args[0])
+		if err != nil {
+			return err
+		}
+		headDoc, err := os.ReadFile(args[1])
+		if err != nil {
+			return err
+		}
+
+		verdicts, err := review.Run(string(beforeDoc), string(headDoc), args[1])
+		if err != nil {
+			return err
+		}
+
+		encoded, err := json.MarshalIndent(verdicts, "", "  ")
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(encoded))
+
+		for _, verdict := range verdicts {
+			if verdict.Blocking() {
+				os.Exit(2)
+			}
+		}
+		return nil
+	},
+}
+
 func init() {
 	// Add persistent flags
 	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "", "set log level (debug, info, warn, error, fatal, panic, off)")
@@ -353,6 +398,7 @@ func init() {
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(latestCmd)
 	rootCmd.AddCommand(tagsCmd)
+	rootCmd.AddCommand(reviewCmd)
 
 	// Add flags to run command
 	runCmd.Flags().StringSliceVar(&preCommands, "pre-commands", []string{}, "commands to run before execution starts (useful for environment setup)")
