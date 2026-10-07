@@ -106,6 +106,16 @@ exits 0.
 
 ## What to produce
 
+Whatever the outcome, write your report to `/tmp/repair-report.md`. When a pull
+request opens, that file is its body, so it states what changed, the attributed
+cause, which tier the fix landed in and why no higher tier applied, and the
+before and after of every assertion touched. When none opens, it is the report
+a human reads instead.
+
+Leave your edits in the working tree and do not commit them. The workflow
+commits and opens the pull request, and the action collects the changes itself,
+so a commit of your own leaves it with nothing to collect.
+
 **Green and `docci review` exits 0:** a pull request, one for the page. The body
 gives:
 - the attributed cause,

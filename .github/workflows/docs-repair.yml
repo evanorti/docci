@@ -77,3 +77,102 @@ jobs:
               print(f"_{omitted} further failure(s) omitted from the record; see the failing run's log._")
           PY
           done
+
+      # Built from this repository's source, so the agent and the guard run the
+      # same docci that the branch under repair contains.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install docci
+        run: go build -o /usr/local/bin/docci .
+
+      - name: Repair
+        id: agent
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # The brief lives in a file so it is reviewed as prose and versioned
+          # with the repository; this prompt only points at it.
+          prompt: |
+            A tutorial failed in CI. Read .github/agent-brief.md and follow it.
+            The failure records are in failure/*.json, one per failing page.
+            When you finish, write your report to /tmp/repair-report.md: what
+            changed, the attributed cause, which tier the fix landed in and why
+            no higher tier applied, and the before and after of every assertion
+            you touched. That file becomes the pull request body.
+          claude_args: |
+            --max-turns 60
+            --allowedTools Bash,Read,Edit,Write,Grep,Glob
+
+      # The weakening guard. It runs after the agent and outside its control:
+      # the brief asks the agent to check itself with `docci review`, but this
+      # step is what decides whether a pull request opens, because an agent that
+      # can skip its own guard has no guard.
+      #
+      # It fails closed. Exit 2 (weakened) fails the job, and so does exit 1
+      # (could not compare), a missing base version, and a missing page. Nothing
+      # here is allowed to `continue` past a page it could not check.
+      - name: Guard the agent's own diff
+        id: guard
+        run: |
+          set -eu
+          shopt -s nullglob
+          records=(failure/*.json)
+          if [ "${#records[@]}" -eq 0 ]; then
+            echo "::error::No failure records; nothing to guard against, so refusing to open a pull request."
+            exit 1
+          fi
+          pages=()
+          for record in "${records[@]}"; do
+            page=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['page'])" "$record")
+            base=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['base_commit'])" "$record")
+            pages+=("$page")
+            if [ ! -f "$page" ]; then
+              echo "::error::$page is missing after the repair; refusing to open a pull request."
+              exit 1
+            fi
+            basepage="$RUNNER_TEMP/base-$(basename "$page")"
+            git show "$base:$page" > "$basepage"
+            status=0
+            docci review "$basepage" "$page" || status=$?
+            if [ "$status" -eq 2 ]; then
+              echo "::error::Repair weakened an assertion on $page; refusing to open a pull request."
+              exit 2
+            elif [ "$status" -ne 0 ]; then
+              echo "::error::docci review could not compare $page (exit $status); refusing to open a pull request."
+              exit 1
+            fi
+          done
+          # The agent repairs documentation. A change outside the failing pages
+          # is not a repair, so it does not ride into the pull request.
+          changed=$(git status --porcelain --untracked-files=all -- . ':!failure' | cut -c4-)
+          while IFS= read -r file; do
+            [ -z "$file" ] && continue
+            ok=0
+            for page in "${pages[@]}"; do [ "$file" = "$page" ] && ok=1; done
+            if [ "$ok" -eq 0 ]; then
+              echo "::error::Repair changed $file, which is not a failing page; refusing to open a pull request."
+              exit 1
+            fi
+          done <<< "$changed"
+
+      # A missing report is itself a signal worth seeing, so say so in the body
+      # rather than failing opaquely or opening a pull request with none.
+      - name: Ensure a pull request body exists
+        if: success() && steps.guard.outcome == 'success'
+        run: |
+          if [ ! -s /tmp/repair-report.md ]; then
+            echo "The repair agent produced no report. The edit passed the weakening guard, but read it carefully before merging." > /tmp/repair-report.md
+          fi
+
+      # Cannot run if the guard failed or was skipped: it requires the guard's
+      # own outcome to be success, not merely that the job is still green.
+      - name: Open a pull request
+        if: success() && steps.guard.outcome == 'success'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: docs-repair/${{ github.run_id }}
+          title: "docs: repair failing tutorial"
+          body-path: /tmp/repair-report.md
+          labels: docs-repair
