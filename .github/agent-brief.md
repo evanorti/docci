@@ -90,6 +90,27 @@ A live environment with docci installed and the page's dependencies up.
 6. **Three attempts, then stop.** If the page is not green and clean by the
    third, report.
 
+## Keep the edit minimal
+
+The page was written by someone who thought about it. Change what is wrong and
+nothing else.
+
+A second reviewer reads the whole page after you, judging whether the fix is
+correct, whether it is elegant, and whether the page still reads well. It sends
+work back for over-correction as readily as for a bad fix. The things it looks
+for, so you do not do them:
+
+- explanation added where none was missing
+- caveats, notes and warnings nobody needed
+- a step restructured when a word was wrong
+- prose rewritten "while we're here"
+- defensive hedging that makes a confident page tentative
+- a section reorganised to accommodate a one-line fix
+
+It also runs the page from a clean environment. A fix that passes only because
+of state your earlier attempts left behind will not survive that, so do not rely
+on anything your own run accumulated.
+
 ## What you may change
 
 Commands, flags, step order, prose, and assertions, as long as `docci review`
