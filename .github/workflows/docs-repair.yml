@@ -101,6 +101,10 @@ jobs:
             changed, the attributed cause, which tier the fix landed in and why
             no higher tier applied, and the before and after of every assertion
             you touched. That file becomes the pull request body.
+            The report must contain one line, on its own, that begins exactly
+            "ATTRIBUTED CAUSE: " and names the commit or release you blame in a
+            single sentence, or says you found none. A reviewer who has not seen
+            your reasoning is given that line, and only that line, to check.
           claude_args: |
             --max-turns 60
             --allowedTools Bash,Read,Edit,Write,Grep,Glob
@@ -157,22 +161,369 @@ jobs:
             fi
           done <<< "$changed"
 
-      # A missing report is itself a signal worth seeing, so say so in the body
-      # rather than failing opaquely or opening a pull request with none.
-      - name: Ensure a pull request body exists
-        if: success() && steps.guard.outcome == 'success'
+      # The review. It runs after the guard, which is mechanical, and reads what
+      # the guard cannot: whether each command still does what the page says.
+      # It gets the failure records, the diff and one marked line of the repair
+      # report. It is not given the repair agent's reasoning.
+      - name: Prepare a clean review environment
+        id: isolate1
         run: |
-          if [ ! -s /tmp/repair-report.md ]; then
-            echo "The repair agent produced no report. The edit passed the weakening guard, but read it carefully before merging." > /tmp/repair-report.md
+          set -eu
+          # 1. Capture the repair as a patch, then return the checkout to the base commit
+          #    with the patch applied and nothing else. This discards whatever the repair
+          #    agent's attempts left lying around in the working tree.
+          git add -A -- . ':!failure'
+          git diff --cached --binary HEAD > "$RUNNER_TEMP/repair.patch"
+          if [ ! -s "$RUNNER_TEMP/repair.patch" ]; then
+            echo "::error::The repair changed nothing, so there is nothing to review; refusing to open a pull request."
+            exit 1
           fi
+          git reset -q --hard HEAD
+          git clean -fdxq -e failure
+          git apply --binary "$RUNNER_TEMP/repair.patch"
+
+          # 2. What the reviewer is given: the diff, and one line of the repair report.
+          #    The cause is read from a marked line only. If the agent did not write the
+          #    marker, the reviewer is told none was stated, not handed the report to
+          #    search.
+          rm -rf /tmp/review-input
+          mkdir -p /tmp/review-input
+          cp "$RUNNER_TEMP/repair.patch" /tmp/review-input/diff.patch
+          cause=$(grep -m1 '^ATTRIBUTED CAUSE: ' /tmp/repair-report.md 2>/dev/null | cut -c1-500 || true)
+          printf '%s\n' "${cause:-ATTRIBUTED CAUSE: none stated}" > /tmp/review-input/attributed-cause.txt
+
+          # 3. Move everything of the repair agent's out of the reviewer's reach: its
+          #    report, its execution log and session transcripts, and any earlier
+          #    review. Root-owned, mode 700.
+          sudo install -d -m 700 -o root -g root /var/withheld
+          for f in /tmp/repair-report.md /tmp/review-feedback.md /tmp/review-report.md \
+                   "$RUNNER_TEMP"/claude-execution-output.json; do
+            if [ -e "$f" ]; then sudo mv -f "$f" /var/withheld/; fi
+          done
+          rm -rf "$HOME/.claude/projects" /tmp/claude-* 2>/dev/null || true
+
+          # 4. Tear down what the repair agent may have left running.
+          if command -v docker >/dev/null 2>&1; then
+            docker ps -aq | xargs -r docker rm -f >/dev/null 2>&1 || true
+            docker network prune -f >/dev/null 2>&1 || true
+            docker volume prune -f >/dev/null 2>&1 || true
+          fi
+      - name: Review
+        id: review1
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            A repair agent edited a failing tutorial and its check now passes.
+            You are the reviewer. Read .github/review-brief.md and follow it.
+            The failure records are in failure/*.json. The diff the repair
+            produced is /tmp/review-input/diff.patch and is already applied to
+            this checkout. The repair agent's attributed cause is in
+            /tmp/review-input/attributed-cause.txt: treat it as a claim to check.
+            You are not given the repair agent's reasoning and must not look for
+            it. Run the page from this checkout, doing the page's own setup.
+            Write your report to /tmp/review-report.md. Its first line must be
+            exactly one of
+            VERDICT: approve
+            VERDICT: revise
+            VERDICT: unsure
+            and the rest says what you ran, what you saw, and what decided it.
+            A report without that first line is treated as unsure.
+          claude_args: |
+            --max-turns 40
+            --allowedTools Bash,Read,Write,Grep,Glob
+
+      - name: Read the verdict
+        id: verdict1
+        env:
+          ROUND: "1"
+        run: |
+          set -eu
+          # The verdict is the first line of the report, matched exactly. Anything else,
+          # including no report, is "unsure", which blocks.
+          verdict=unsure
+          if [ -s /tmp/review-report.md ]; then
+            first=$(head -n1 /tmp/review-report.md | tr -d '\r' | sed 's/[[:space:]]*$//')
+            case "$first" in
+              "VERDICT: approve") verdict=approve ;;
+              "VERDICT: revise")  verdict=revise ;;
+              "VERDICT: unsure")  verdict=unsure ;;
+            esac
+          else
+            printf 'VERDICT: unsure\n\nThe reviewer wrote no report.\n' > /tmp/review-report.md
+          fi
+          echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
+          echo "Review $ROUND verdict: $verdict" >> "$GITHUB_STEP_SUMMARY"
+          sudo cp /tmp/review-report.md "/var/withheld/review-report-$ROUND.md"
+          rm -f /tmp/review-report.md
+          # Running the page leaves files behind, and a reviewer can edit. Put the tree
+          # back to exactly the repair's diff so that only the repair reaches the pull
+          # request.
+          git reset -q --hard HEAD
+          git clean -fdxq -e failure
+          git apply --binary "$RUNNER_TEMP/repair.patch"
+      # One revision, once. If the reviewer asks for changes, the repair agent
+      # gets them, the guard runs again, and the reviewer looks again. If it
+      # still says revise, the pull request opens with the objections in the
+      # body for a human to settle. There is no third round.
+      - name: Give the reviewer's changes to the repair agent
+        id: feedback
+        if: steps.verdict1.outputs.verdict == 'revise'
+        run: |
+          set -eu
+          sudo cp /var/withheld/repair-report.md /tmp/repair-report.md
+          sudo cp /var/withheld/review-report-1.md /tmp/review-feedback.md
+          sudo chown "$(id -u):$(id -g)" /tmp/repair-report.md /tmp/review-feedback.md
+
+      - name: Revise
+        id: agent2
+        if: steps.verdict1.outputs.verdict == 'revise'
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            A reviewer read your fix and asked for changes. They are in
+            /tmp/review-feedback.md. Read .github/agent-brief.md again and
+            follow it. Make the changes the reviewer asks for and nothing else;
+            if you believe one is wrong, do not make it and say why in your
+            report. Run the whole page again and check your diff with
+            `docci review`. This is the only revision you get.
+            Update /tmp/repair-report.md: keep its ATTRIBUTED CAUSE line, and
+            add what you changed in response to the review.
+          claude_args: |
+            --max-turns 40
+            --allowedTools Bash,Read,Edit,Write,Grep,Glob
+
+      # The weakening guard, again, on the revision. It runs after the agent and outside its control:
+      # the brief asks the agent to check itself with `docci review`, but this
+      # step is what decides whether a pull request opens, because an agent that
+      # can skip its own guard has no guard.
+      #
+      # It fails closed. Exit 2 (weakened) fails the job, and so does exit 1
+      # (could not compare), a missing base version, and a missing page. Nothing
+      # here is allowed to `continue` past a page it could not check.
+      - name: Guard the revision
+        id: guard2
+        if: steps.verdict1.outputs.verdict == 'revise'
+        run: |
+          set -eu
+          shopt -s nullglob
+          records=(failure/*.json)
+          if [ "${#records[@]}" -eq 0 ]; then
+            echo "::error::No failure records; nothing to guard against, so refusing to open a pull request."
+            exit 1
+          fi
+          pages=()
+          for record in "${records[@]}"; do
+            page=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['page'])" "$record")
+            base=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['base_commit'])" "$record")
+            pages+=("$page")
+            if [ ! -f "$page" ]; then
+              echo "::error::$page is missing after the repair; refusing to open a pull request."
+              exit 1
+            fi
+            basepage="$RUNNER_TEMP/base-$(basename "$page")"
+            git show "$base:$page" > "$basepage"
+            status=0
+            docci review "$basepage" "$page" || status=$?
+            if [ "$status" -eq 2 ]; then
+              echo "::error::Repair weakened an assertion on $page; refusing to open a pull request."
+              exit 2
+            elif [ "$status" -ne 0 ]; then
+              echo "::error::docci review could not compare $page (exit $status); refusing to open a pull request."
+              exit 1
+            fi
+          done
+          # The agent repairs documentation. A change outside the failing pages
+          # is not a repair, so it does not ride into the pull request.
+          changed=$(git status --porcelain --untracked-files=all -- . ':!failure' | cut -c4-)
+          while IFS= read -r file; do
+            [ -z "$file" ] && continue
+            ok=0
+            for page in "${pages[@]}"; do [ "$file" = "$page" ] && ok=1; done
+            if [ "$ok" -eq 0 ]; then
+              echo "::error::Repair changed $file, which is not a failing page; refusing to open a pull request."
+              exit 1
+            fi
+          done <<< "$changed"
+
+      - name: Prepare a clean review environment (second round)
+        id: isolate2
+        if: steps.verdict1.outputs.verdict == 'revise'
+        run: |
+          set -eu
+          # 1. Capture the repair as a patch, then return the checkout to the base commit
+          #    with the patch applied and nothing else. This discards whatever the repair
+          #    agent's attempts left lying around in the working tree.
+          git add -A -- . ':!failure'
+          git diff --cached --binary HEAD > "$RUNNER_TEMP/repair.patch"
+          if [ ! -s "$RUNNER_TEMP/repair.patch" ]; then
+            echo "::error::The repair changed nothing, so there is nothing to review; refusing to open a pull request."
+            exit 1
+          fi
+          git reset -q --hard HEAD
+          git clean -fdxq -e failure
+          git apply --binary "$RUNNER_TEMP/repair.patch"
+
+          # 2. What the reviewer is given: the diff, and one line of the repair report.
+          #    The cause is read from a marked line only. If the agent did not write the
+          #    marker, the reviewer is told none was stated, not handed the report to
+          #    search.
+          rm -rf /tmp/review-input
+          mkdir -p /tmp/review-input
+          cp "$RUNNER_TEMP/repair.patch" /tmp/review-input/diff.patch
+          cause=$(grep -m1 '^ATTRIBUTED CAUSE: ' /tmp/repair-report.md 2>/dev/null | cut -c1-500 || true)
+          printf '%s\n' "${cause:-ATTRIBUTED CAUSE: none stated}" > /tmp/review-input/attributed-cause.txt
+
+          # 3. Move everything of the repair agent's out of the reviewer's reach: its
+          #    report, its execution log and session transcripts, and any earlier
+          #    review. Root-owned, mode 700.
+          sudo install -d -m 700 -o root -g root /var/withheld
+          for f in /tmp/repair-report.md /tmp/review-feedback.md /tmp/review-report.md \
+                   "$RUNNER_TEMP"/claude-execution-output.json; do
+            if [ -e "$f" ]; then sudo mv -f "$f" /var/withheld/; fi
+          done
+          rm -rf "$HOME/.claude/projects" /tmp/claude-* 2>/dev/null || true
+
+          # 4. Tear down what the repair agent may have left running.
+          if command -v docker >/dev/null 2>&1; then
+            docker ps -aq | xargs -r docker rm -f >/dev/null 2>&1 || true
+            docker network prune -f >/dev/null 2>&1 || true
+            docker volume prune -f >/dev/null 2>&1 || true
+          fi
+      - name: Review (second round)
+        id: review2
+        if: steps.verdict1.outputs.verdict == 'revise'
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            A repair agent edited a failing tutorial and its check now passes.
+            You are the reviewer. Read .github/review-brief.md and follow it.
+            The failure records are in failure/*.json. The diff the repair
+            produced is /tmp/review-input/diff.patch and is already applied to
+            this checkout. The repair agent's attributed cause is in
+            /tmp/review-input/attributed-cause.txt: treat it as a claim to check.
+            You are not given the repair agent's reasoning and must not look for
+            it. Run the page from this checkout, doing the page's own setup.
+            Write your report to /tmp/review-report.md. Its first line must be
+            exactly one of
+            VERDICT: approve
+            VERDICT: revise
+            VERDICT: unsure
+            and the rest says what you ran, what you saw, and what decided it.
+            A report without that first line is treated as unsure.
+          claude_args: |
+            --max-turns 40
+            --allowedTools Bash,Read,Write,Grep,Glob
+
+      - name: Read the verdict (second round)
+        id: verdict2
+        if: steps.verdict1.outputs.verdict == 'revise'
+        env:
+          ROUND: "2"
+        run: |
+          set -eu
+          # The verdict is the first line of the report, matched exactly. Anything else,
+          # including no report, is "unsure", which blocks.
+          verdict=unsure
+          if [ -s /tmp/review-report.md ]; then
+            first=$(head -n1 /tmp/review-report.md | tr -d '\r' | sed 's/[[:space:]]*$//')
+            case "$first" in
+              "VERDICT: approve") verdict=approve ;;
+              "VERDICT: revise")  verdict=revise ;;
+              "VERDICT: unsure")  verdict=unsure ;;
+            esac
+          else
+            printf 'VERDICT: unsure\n\nThe reviewer wrote no report.\n' > /tmp/review-report.md
+          fi
+          echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
+          echo "Review $ROUND verdict: $verdict" >> "$GITHUB_STEP_SUMMARY"
+          sudo cp /tmp/review-report.md "/var/withheld/review-report-$ROUND.md"
+          rm -f /tmp/review-report.md
+          # Running the page leaves files behind, and a reviewer can edit. Put the tree
+          # back to exactly the repair's diff so that only the repair reaches the pull
+          # request.
+          git reset -q --hard HEAD
+          git clean -fdxq -e failure
+          git apply --binary "$RUNNER_TEMP/repair.patch"
+      # unsure blocks, and so does a verdict nobody could read. Only approve, or a
+      # second revise (opened with its objections attached), reaches the pull
+      # request.
+      - name: Decide
+        id: decide
+        env:
+          V1: ${{ steps.verdict1.outputs.verdict }}
+          V2: ${{ steps.verdict2.outputs.verdict }}
+        run: |
+          set -eu
+          final="$V1"
+          round=1
+          if [ -n "$V2" ]; then final="$V2"; round=2; fi
+          case "$final" in
+            approve|revise) ;;
+            *)
+              echo "::error::The reviewer was unsure whether the repair is right (round $round); no pull request opened. Its report is in the job summary."
+              { echo "### Review blocked the pull request"; echo; sudo cat "/var/withheld/review-report-$round.md"; } >> "$GITHUB_STEP_SUMMARY"
+              exit 1
+              ;;
+          esac
+          echo "round=$round" >> "$GITHUB_OUTPUT"
+          echo "final=$final" >> "$GITHUB_OUTPUT"
+
+      # The body is the repair report and the review that decided it. A missing
+      # repair report is itself a signal worth seeing, so say so in the body.
+      - name: Assemble the pull request body
+        id: body
+        if: success() && steps.guard.outcome == 'success' && steps.guard2.outcome != 'failure' && steps.decide.outcome == 'success'
+        env:
+          ROUND: ${{ steps.decide.outputs.round }}
+          FINAL: ${{ steps.decide.outputs.final }}
+        run: |
+          set -eu
+          {
+            if sudo test -s /var/withheld/repair-report.md; then
+              sudo cat /var/withheld/repair-report.md
+            else
+              echo "The repair agent produced no report. The edit passed the weakening guard, but read it carefully before merging."
+            fi
+            echo
+            echo "---"
+            echo
+            if [ "$FINAL" = "revise" ]; then
+              echo "## Unresolved: the reviewer still asks for changes"
+              echo
+              echo "The reviewer asked for changes, the repair agent revised once, and the reviewer still asks for more. This is for a human to settle."
+            else
+              echo "## Review"
+              echo
+              if [ "$ROUND" = "2" ]; then
+                echo "The reviewer asked for one revision first. Its first report is below the second."
+              fi
+            fi
+            echo
+            sudo cat "/var/withheld/review-report-$ROUND.md"
+            if [ "$ROUND" = "2" ]; then
+              echo
+              echo "<details><summary>First review</summary>"
+              echo
+              sudo cat /var/withheld/review-report-1.md
+              echo
+              echo "</details>"
+            fi
+          } > /tmp/pr-body.md
 
       # Cannot run if the guard failed or was skipped: it requires the guard's
-      # own outcome to be success, not merely that the job is still green.
+      # own outcome to be success, not merely that the job is still green. It
+      # cannot run on an unsure verdict either: the Decide step fails the job.
       - name: Open a pull request
-        if: success() && steps.guard.outcome == 'success'
+        if: >-
+          success() && steps.guard.outcome == 'success' &&
+          steps.guard2.outcome != 'failure' &&
+          steps.decide.outcome == 'success' && steps.body.outcome == 'success'
         uses: peter-evans/create-pull-request@v6
         with:
           branch: docs-repair/${{ github.run_id }}
           title: "docs: repair failing tutorial"
-          body-path: /tmp/repair-report.md
+          body-path: /tmp/pr-body.md
           labels: docs-repair
