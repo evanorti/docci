@@ -90,6 +90,27 @@ A live environment with docci installed and the page's dependencies up.
 6. **Three attempts, then stop.** If the page is not green and clean by the
    third, report.
 
+## Work out whether the page or the code is wrong
+
+Before deciding a tier, decide which side is at fault. The page is not
+automatically the thing to change — it may be right and the product may have
+broken. Three places to look, in order of how much they settle:
+
+**The page's own arithmetic.** If an expected value follows from earlier steps —
+set 100, spend 10, expect 90 — then 90 is true whatever the code prints. A
+mismatch means the code is wrong, and you can say so with certainty and no
+history at all.
+
+**The product contradicting itself.** A tool reporting that it spent 10 while
+deducting 15 is wrong on its own terms, regardless of what any page claims.
+
+**The history.** A diff, a commit or a changelog saying the change was
+deliberate. An unexplained change is weaker evidence than a documented one.
+
+Found none of those, and the value is arbitrary with nothing to derive it from?
+Then you genuinely cannot tell, and saying so is the right answer. Report it,
+with the edit you would have made attached for a human to take.
+
 ## Keep the edit minimal
 
 The page was written by someone who thought about it. Change what is wrong and
