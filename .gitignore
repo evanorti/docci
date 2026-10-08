@@ -8,3 +8,6 @@ build/
 # used in the readme.md for testing
 example.html
 styles.css
+
+# failure records downloaded by the repair job; never commit them
+failure/

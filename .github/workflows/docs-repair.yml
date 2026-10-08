@@ -166,6 +166,15 @@ jobs:
               exit 1
             fi
           done <<< "$changed"
+          # The pages this step just checked, for the pull request to add and
+          # nothing else. create-pull-request would otherwise `git add -A` and
+          # commit failure/ (up to 400KB of CI log per record) and whatever the
+          # agent's run left behind.
+          {
+            echo "pages<<PAGES_EOF"
+            printf '%s\n' "${pages[@]}"
+            echo "PAGES_EOF"
+          } >> "$GITHUB_OUTPUT"
 
       # The review. It runs after the guard, which is mechanical, and reads what
       # the guard cannot: whether each command still does what the page says.
@@ -352,6 +361,15 @@ jobs:
               exit 1
             fi
           done <<< "$changed"
+          # The pages this step just checked, for the pull request to add and
+          # nothing else. create-pull-request would otherwise `git add -A` and
+          # commit failure/ (up to 400KB of CI log per record) and whatever the
+          # agent's run left behind.
+          {
+            echo "pages<<PAGES_EOF"
+            printf '%s\n' "${pages[@]}"
+            echo "PAGES_EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Prepare a clean review environment (second round)
         id: isolate2
@@ -530,6 +548,9 @@ jobs:
         uses: peter-evans/create-pull-request@v6
         with:
           branch: docs-repair/${{ github.run_id }}
+          # Only the pages the guard checked. The revision guard, when it ran,
+          # re-checked the same records, so its list wins.
+          add-paths: ${{ steps.guard2.outputs.pages || steps.guard.outputs.pages }}
           title: "docs: repair failing tutorial"
           body-path: /tmp/pr-body.md
           labels: docs-repair
