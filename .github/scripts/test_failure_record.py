@@ -191,3 +191,37 @@ def test_validation_only_logs_have_no_command_failure():
     # successful commands in the log must not be mistaken for a failure
     ok = build("     Executing CMD: ./toy a\nout\n")
     assert ok["failures"] == [] and ok["kind"] == ""
+
+
+def run_with(log_text, *extra):
+    args = [sys.executable, str(SCRIPT), "--page", "docs/x.mdx", "--base-commit", "abc123",
+            "--trigger", "pull_request", *extra]
+    result = subprocess.run(args, input=log_text, capture_output=True, text=True, check=True)
+    return json.loads(result.stdout)
+
+
+def test_diff_defaults_to_empty():
+    record = build(REAL)
+    assert record["diff"] == ""
+    assert record["diff_truncated"] is False
+
+
+def test_diff_file_is_recorded_whole_when_small(tmp_path):
+    diff = tmp_path / "pr.diff"
+    diff.write_text(" go.mod | 2 +-\n\ndiff --git a/go.mod b/go.mod\n-v1\n+v2\n")
+    record = run_with(REAL, "--diff-file", str(diff))
+    assert record["diff"] == diff.read_text()
+    assert record["diff_truncated"] is False
+
+
+def test_oversized_diff_is_cut_to_the_limit_and_says_so(tmp_path):
+    diff = tmp_path / "pr.diff"
+    # A unique marker at the start (kept) and the end (cut).
+    diff.write_text("STAT-AT-START\n" + "x" * 200_000 + "\nPATCH-AT-END")
+    record = run_with(REAL, "--diff-file", str(diff))
+    assert len(record["diff"]) <= 60_000
+    assert record["diff_truncated"] is True
+    assert record["diff"].startswith("STAT-AT-START")
+    assert "PATCH-AT-END" not in record["diff"]
+    assert "characters of diff truncated" in record["diff"]
+    assert run_with(REAL, "--diff-file", str(diff))["diff"] == record["diff"]

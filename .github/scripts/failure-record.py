@@ -32,6 +32,10 @@ import sys
 # diagnosis the agent writes alongside it.
 LOG_LIMIT = 400_000
 FIELD_LIMIT = 50_000
+# The pull request's diff is context for "was this change deliberate?", not a
+# second copy of the PR. Enough for the stat summary and the first few files;
+# the log gets 400k, so this stays well inside the same budget.
+DIFF_LIMIT = 60_000
 # A page with dozens of failures is comprehensively broken; ten is enough to see
 # the pattern behind them.
 MAX_FAILURES = 10
@@ -55,6 +59,20 @@ def clip(text):
     if len(text) <= FIELD_LIMIT:
         return text
     return text[:FIELD_LIMIT] + f"\n... {len(text) - FIELD_LIMIT} characters truncated ..."
+
+
+def truncate_diff(diff):
+    """Keep the start of an oversized diff, never exceeding DIFF_LIMIT.
+
+    The stat summary comes first, so the start names every changed file even when
+    the patch itself is cut. A pure function of the input, like the log cut.
+    """
+    if len(diff) <= DIFF_LIMIT:
+        return diff, False
+    notice = "\n\n... {} characters of diff truncated ...\n"
+    # The notice's own width depends on the count it states; reserve for the widest.
+    keep = DIFF_LIMIT - len(notice.format(len(diff)))
+    return diff[:keep] + notice.format(len(diff) - keep), True
 
 
 def truncate(log):
@@ -190,8 +208,16 @@ def main():
     parser.add_argument("--base-commit", required=True)
     parser.add_argument("--trigger", required=True, choices=["pull_request", "schedule"])
     parser.add_argument("--diff", default="")
+    # A diff can exceed the OS limit on a single argument, so it can come from a file.
+    parser.add_argument("--diff-file", default="")
     parser.add_argument("--upstream-range", default="")
     args = parser.parse_args()
+
+    diff = args.diff
+    if args.diff_file:
+        with open(args.diff_file, encoding="utf-8", errors="replace") as handle:
+            diff = handle.read()
+    diff, diff_truncated = truncate_diff(diff)
 
     log = ANSI_RE.sub("", sys.stdin.read())
     truncated_log, was_truncated = truncate(log)
@@ -212,7 +238,8 @@ def main():
         "log_truncated": was_truncated,
         "base_commit": args.base_commit,
         "trigger": args.trigger,
-        "diff": args.diff,
+        "diff": diff,
+        "diff_truncated": diff_truncated,
         "upstream_range": args.upstream_range,
     }
 

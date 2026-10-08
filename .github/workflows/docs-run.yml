@@ -79,6 +79,10 @@ jobs:
         page: ${{ fromJSON(needs.select.outputs.pages) }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The failure record carries the pull request's diff, which needs the
+          # base commit.
+          fetch-depth: 0
 
       # Whatever the pages need in order to run. Replace with the real toolchain.
       - uses: actions/setup-go@v5
@@ -112,10 +116,27 @@ jobs:
           TRIGGER: ${{ github.event_name == 'schedule' && 'schedule' || 'pull_request' }}
         run: |
           mkdir -p failure
+          # What the pull request changed, so the agent can tell a deliberate
+          # change from a regression: a stat of every changed file (pages
+          # included, so it sees what was edited), then the patch for everything
+          # that is not a docs page or a lockfile. failure-record.py caps it.
+          # Kept out of failure/, which is uploaded as-is.
+          : > "$RUNNER_TEMP/pr.diff"
+          if [ "$TRIGGER" = pull_request ]; then
+            {
+              git diff --stat=120 "$BASE_COMMIT...HEAD" || true
+              echo
+              git diff "$BASE_COMMIT...HEAD" -- . \
+                ':(exclude,glob)docs/**/*.md' ':(exclude,glob)docs/**/*.mdx' \
+                ':(exclude,glob)**/go.sum' ':(exclude,glob)**/package-lock.json' \
+                ':(exclude,glob)**/yarn.lock' ':(exclude,glob)**/pnpm-lock.yaml' || true
+            } > "$RUNNER_TEMP/pr.diff"
+          fi
           python3 .github/scripts/failure-record.py \
               --page "$PAGE" \
               --base-commit "$BASE_COMMIT" \
               --trigger "$TRIGGER" \
+              --diff-file "$RUNNER_TEMP/pr.diff" \
               < docci.log \
             > "failure/$(echo "$PAGE" | tr '/' '-').json"
 
