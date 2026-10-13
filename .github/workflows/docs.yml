@@ -205,6 +205,14 @@ jobs:
       - name: Install docci
         run: go build -o /usr/local/bin/docci .
 
+      # Temporary. Proves the secret holds the same bytes as the key that works
+      # locally, without printing it: a length and a hash prefix.
+      - name: Fingerprint the key
+        env:
+          K: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          printf 'len=%s sha=%s\n' "${#K}" "$(printf '%s' "$K" | sha256sum | cut -c1-12)"
+
       - name: Repair
         id: agent
         uses: anthropics/claude-code-action@v1
