@@ -1,0 +1,42 @@
+# A probe, not part of the docs pipeline. It runs the agent action with a
+# one-word prompt under each credential in turn, so a failure is the
+# credential and nothing else. Delete it once the pipeline authenticates.
+name: Auth probe
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    name: ${{ matrix.credential }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        credential: [api_key, oauth_token]
+    steps:
+      - name: Ask for one word
+        id: agent
+        continue-on-error: true
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ matrix.credential == 'api_key' && secrets.ANTHROPIC_API_KEY || '' }}
+          claude_code_oauth_token: ${{ matrix.credential == 'oauth_token' && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}
+          prompt: "Reply with exactly: OK"
+          claude_args: --max-turns 1
+
+      - name: What happened
+        if: always()
+        run: |
+          f='${{ steps.agent.outputs.execution_file }}'
+          if [ -z "$f" ] || [ ! -f "$f" ]; then
+            echo "${{ matrix.credential }}: no execution file; the action failed before calling the model"
+            exit 0
+          fi
+          printf '%s: ' "${{ matrix.credential }}"
+          jq -r '.[] | select(.type == "result")
+                     | [.subtype, (.is_error|tostring), (.result // .error // "")]
+                     | @tsv' "$f" | head -5
