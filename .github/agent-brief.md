@@ -107,6 +107,11 @@ deducting 15 is wrong on its own terms, regardless of what any page claims.
 **The history.** A diff, a commit or a changelog saying the change was
 deliberate. An unexplained change is weaker evidence than a documented one.
 
+You have git history and `gh` available, so look for yourself. The last green
+run is `gh run list --workflow docs.yml --status success --limit 1 --json headSha`;
+diff against it. The cause may be outside the repo entirely, such as an upstream
+image or dependency that moved.
+
 Found none of those, and the value is arbitrary with nothing to derive it from?
 Then you genuinely cannot tell, and saying so is the right answer. Report it,
 with the edit you would have made attached for a human to take.

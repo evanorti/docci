@@ -11,3 +11,7 @@ styles.css
 
 # failure records downloaded by the repair job; never commit them
 failure/
+
+# pytest
+.pytest_cache/
+__pycache__/

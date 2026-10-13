@@ -1,64 +1,174 @@
-# Repairs a tutorial that docs-run found broken.
+# Runs every tutorial each night. A page that broke is repaired by an agent and
+# offered as a pull request; one the agent could not fix becomes an issue and
+# turns the run red.
 #
-# Triggers only on workflow_run. A repair job reachable from a pull_request
-# event would run attacker-controlled page content with a write token the
-# moment someone opened a pull request from a fork. workflow_run runs the base
-# repository's workflow definition, with secrets, after the untrusted job has
-# already finished.
+# Red means "something broke that an agent could not fix". A guide that broke
+# and WAS fixed leaves a green run and a pull request: the pull request is the
+# signal. A daily job that goes red for routine drift gets ignored.
 #
-# Do not add pull_request or pull_request_target to the triggers below.
+# A scheduled workflow runs only from the default branch, on this repository's
+# own code, so there is no untrusted input to guard against here. Do not add
+# pull_request or pull_request_target to the triggers below: the repair job
+# holds a write token and runs an agent.
+#
+# The minute is off the hour on purpose. Scheduled runners are contended at :00
+# and runs there get delayed or dropped.
 
-name: Docs repair
+name: Docs
 
 on:
-  workflow_run:
-    workflows: ["Docs run"]
-    types: [completed]
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
 
+# A manual run should not collide with the nightly one over the same pages, but
+# neither should cancel the other halfway through a repair.
+concurrency:
+  group: docs
+  cancel-in-progress: false
+
+# id-token: the action mints an OIDC token to obtain its GitHub app token and
+# fails without it.
 permissions:
   contents: write
   pull-requests: write
+  issues: write
+  id-token: write
+
+env:
+  DOCS_DIR: docs
 
 jobs:
-  # A fork's failing run is declined in a job of its own, so that no later step
-  # can be reached from it. (A step that merely exits 0 would not stop the
-  # steps after it.)
-  decline-fork:
-    if: >-
-      github.event.workflow_run.conclusion == 'failure' &&
-      github.event.workflow_run.head_repository.full_name != github.repository
+  list:
+    name: List pages
     runs-on: ubuntu-latest
+    outputs:
+      pages: ${{ steps.list.outputs.pages }}
+      any: ${{ steps.list.outputs.any }}
     steps:
-      - name: Decline untrusted head
+      - uses: actions/checkout@v4
+
+      # A page is runnable if it carries a docci directive. docci skips a page
+      # that says `runnable: false` itself and exits 0 on a page with no
+      # directives, so nothing else decides what "runnable" means.
+      - name: Find pages with docci directives
+        id: list
         run: |
-          {
-            echo "### Repair skipped"
-            echo "The failing run came from a fork. A fix for a fork's pull request is the author's to make."
-          } >> "$GITHUB_STEP_SUMMARY"
+          set -eu
+          grep -rlE --include='*.md' --include='*.mdx' '\{/\* docci|<!-- docci' "$DOCS_DIR" \
+            | sort > pages.txt || true
+          echo "pages:"; cat pages.txt
+          if [ -s pages.txt ]; then
+            pages=$(python3 -c "import json,sys; print(json.dumps([l.strip() for l in open('pages.txt') if l.strip()]))")
+            echo "any=true" >> "$GITHUB_OUTPUT"
+          else
+            pages='[]'
+            echo "any=false" >> "$GITHUB_OUTPUT"
+            echo "No pages carry docci directives."
+          fi
+          echo "pages=$pages" >> "$GITHUB_OUTPUT"
+
+  check:
+    name: ${{ matrix.page }}
+    needs: list
+    if: needs.list.outputs.any == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        page: ${{ fromJSON(needs.list.outputs.pages) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Whatever the pages need in order to run. Replace with the real toolchain.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      # This repo IS docci, so it is built from source. A docs repo installs a
+      # release instead -- one new enough to read comment directives.
+      - name: Build docci
+        run: go build -o /usr/local/bin/docci .
+
+      # A broken guide is routine, and the repair job decides the outcome of the
+      # run, so this step records its failure and does not fail the job. The
+      # output is kept so the failure record is built from the run that actually
+      # failed; running the page twice would cost minutes and an intermittent
+      # page could pass the second time. No pipefail here (the default shell has
+      # none), so the exit status is docci's own, read from PIPESTATUS.
+      - name: Run the page
+        id: run
+        continue-on-error: true
+        env:
+          PAGE: ${{ matrix.page }}
+        run: |
+          docci run "$PAGE" --hide-background-logs 2>&1 | tee docci.log
+          exit "${PIPESTATUS[0]}"
+
+      # Reads docci.log; it never runs the page.
+      - name: Build failure record
+        if: steps.run.outcome == 'failure'
+        env:
+          PAGE: ${{ matrix.page }}
+          TRIGGER: ${{ github.event_name }}
+        run: |
+          mkdir -p failure
+          python3 .github/scripts/failure-record.py \
+              --page "$PAGE" \
+              --base-commit "$GITHUB_SHA" \
+              --trigger "$TRIGGER" \
+              < docci.log \
+            > "failure/$(echo "$PAGE" | tr '/' '-').json"
+
+      - name: Upload failure record
+        if: steps.run.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-record-${{ strategy.job-index }}
+          path: failure/
+          retention-days: 30
+
+  # Decides whether there is anything to repair. Downloading is allowed to find
+  # nothing; the job after it is gated on what it found.
+  records:
+    name: Any failures?
+    needs: [list, check]
+    if: ${{ !cancelled() && needs.list.outputs.any == 'true' }}
+    runs-on: ubuntu-latest
+    outputs:
+      any: ${{ steps.count.outputs.any }}
+    steps:
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          pattern: failure-record-*
+          path: failure/
+          merge-multiple: true
+      - name: Count failure records
+        id: count
+        run: |
+          shopt -s nullglob
+          records=(failure/*.json)
+          echo "${#records[@]} failure record(s)"
+          if [ "${#records[@]}" -gt 0 ]; then echo "any=true" >> "$GITHUB_OUTPUT"; else echo "any=false" >> "$GITHUB_OUTPUT"; fi
 
   repair:
-    # claude-code-action mints an OIDC token to obtain a GitHub app token.
-    # Scoped to this job so decline-fork, which handles untrusted runs, never has it.
-    permissions:
-      contents: write
-      pull-requests: write
-      id-token: write
-    if: >-
-      github.event.workflow_run.conclusion == 'failure' &&
-      github.event.workflow_run.head_repository.full_name == github.repository
+    name: Repair
+    needs: records
+    if: ${{ !cancelled() && needs.records.outputs.any == 'true' }}
     runs-on: ubuntu-latest
+    env:
+      # The agent has `gh` in this job to investigate with.
+      GH_TOKEN: ${{ github.token }}
     steps:
-      # Same-repository branch only: the job-level condition above guarantees it.
+      # The whole history: the agent investigates what changed itself.
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_branch }}
           fetch-depth: 0
 
       - name: Download failure records
         uses: actions/download-artifact@v4
         with:
-          run-id: ${{ github.event.workflow_run.id }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
           pattern: failure-record-*
           path: failure/
           merge-multiple: true
@@ -471,35 +581,53 @@ jobs:
           git reset -q --hard HEAD
           git clean -fdxq -e failure
           git apply --binary "$RUNNER_TEMP/repair.patch"
-      # unsure blocks, and so does a verdict nobody could read. Only approve, or a
-      # second revise (opened with its objections attached), reaches the pull
-      # request.
+      # Fixed means the guard passed on every round that ran and the reviewer did
+      # not say unsure. Anything else -- the agent gave up, the guard refused, the
+      # reviewer was unsure, a step above failed or never ran -- is not fixed,
+      # and `always()` is what lets this step see that. A verdict of revise after
+      # the one revision is still fixed: the pull request opens with the
+      # reviewer's objections in the body for a human to settle.
       - name: Decide
         id: decide
+        if: always()
         env:
+          GUARD1: ${{ steps.guard.outcome }}
+          GUARD2: ${{ steps.guard2.outcome }}
           V1: ${{ steps.verdict1.outputs.verdict }}
           V2: ${{ steps.verdict2.outputs.verdict }}
         run: |
           set -eu
-          final="$V1"
+          fixed=false
+          final=""
           round=1
-          if [ -n "$V2" ]; then final="$V2"; round=2; fi
+          reason="The repair agent did not produce a fix that passed the guard."
+          if [ "$GUARD1" = success ] && [ -n "$V1" ]; then
+            final="$V1"
+            if [ "$V1" = revise ]; then
+              round=2
+              if [ "$GUARD2" = success ] && [ -n "$V2" ]; then
+                final="$V2"
+              else
+                final=""
+                reason="The reviewer asked for a revision and the revision did not pass the guard."
+              fi
+            fi
+          fi
           case "$final" in
-            approve|revise) ;;
-            *)
-              echo "::error::The reviewer was unsure whether the repair is right (round $round); no pull request opened. Its report is in the job summary."
-              { echo "### Review blocked the pull request"; echo; sudo cat "/var/withheld/review-report-$round.md"; } >> "$GITHUB_STEP_SUMMARY"
-              exit 1
-              ;;
+            approve|revise) fixed=true ;;
+            unsure) reason="The reviewer was unsure whether the repair is right (round $round)." ;;
           esac
+          echo "fixed=$fixed" >> "$GITHUB_OUTPUT"
           echo "round=$round" >> "$GITHUB_OUTPUT"
           echo "final=$final" >> "$GITHUB_OUTPUT"
+          echo "reason=$reason" >> "$GITHUB_OUTPUT"
+          echo "Outcome: fixed=$fixed final=${final:-none}" >> "$GITHUB_STEP_SUMMARY"
 
       # The body is the repair report and the review that decided it. A missing
       # repair report is itself a signal worth seeing, so say so in the body.
       - name: Assemble the pull request body
         id: body
-        if: success() && steps.guard.outcome == 'success' && steps.guard2.outcome != 'failure' && steps.decide.outcome == 'success'
+        if: steps.decide.outputs.fixed == 'true'
         env:
           ROUND: ${{ steps.decide.outputs.round }}
           FINAL: ${{ steps.decide.outputs.final }}
@@ -537,20 +665,70 @@ jobs:
             fi
           } > /tmp/pr-body.md
 
-      # Cannot run if the guard failed or was skipped: it requires the guard's
-      # own outcome to be success, not merely that the job is still green. It
-      # cannot run on an unsure verdict either: the Decide step fails the job.
+      # Cannot run unless Decide said fixed, which requires the guard's own
+      # outcome to be success on every round that ran.
       - name: Open a pull request
-        if: >-
-          success() && steps.guard.outcome == 'success' &&
-          steps.guard2.outcome != 'failure' &&
-          steps.decide.outcome == 'success' && steps.body.outcome == 'success'
+        if: steps.decide.outputs.fixed == 'true' && steps.body.outcome == 'success'
         uses: peter-evans/create-pull-request@v6
         with:
+          base: ${{ github.event.repository.default_branch }}
           branch: docs-repair/${{ github.run_id }}
           # Only the pages the guard checked. The revision guard, when it ran,
-          # re-checked the same records, so its list wins.
+          # re-checked the same records, so its list wins. The failure records
+          # are never added.
           add-paths: ${{ steps.guard2.outputs.pages || steps.guard.outputs.pages }}
           title: "docs: repair failing tutorial"
           body-path: /tmp/pr-body.md
           labels: docs-repair
+
+      # Not fixed: one issue per page, or a comment on the one already open.
+      - name: File an issue
+        if: always() && steps.decide.outputs.fixed != 'true'
+        env:
+          REASON: ${{ steps.decide.outputs.reason }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -eu
+          shopt -s nullglob
+          gh label create docs-repair-failed --color B60205 \
+            --description "A tutorial broke and the repair agent could not fix it" 2>/dev/null || true
+          for record in failure/*.json; do
+            page=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['page'])" "$record")
+            {
+              echo "The nightly docs run found \`$page\` broken, and it was not repaired automatically."
+              echo
+              echo "${REASON:-The repair job stopped before reaching a verdict.}"
+              echo
+              echo "Run: $RUN_URL"
+              echo
+              python3 - "$record" <<'PY'
+          import json, sys
+          record = json.load(open(sys.argv[1]))
+          for i, f in enumerate(record.get("failures") or [], 1):
+              print(f"#### {i}. {f['step']}\n")
+              print("Expected\n```\n" + f["expected"] + "\n```\n")
+              print("Actual\n```\n" + f["actual"] + "\n```\n")
+          PY
+              for report in repair-report.md review-report-1.md review-report-2.md; do
+                if sudo test -s "/var/withheld/$report"; then
+                  echo "<details><summary>$report</summary>"; echo
+                  sudo cat "/var/withheld/$report"; echo; echo "</details>"
+                fi
+              done
+            } > "$RUNNER_TEMP/issue-body.md"
+            existing=$(gh issue list --state open --label docs-repair-failed \
+              --search "in:title \"$page\"" --json number --jq '.[0].number // empty')
+            if [ -n "$existing" ]; then
+              gh issue comment "$existing" --body-file "$RUNNER_TEMP/issue-body.md"
+            else
+              gh issue create --label docs-repair-failed \
+                --title "docs: $page is broken" --body-file "$RUNNER_TEMP/issue-body.md"
+            fi
+          done
+
+      # The only thing that turns the run red: a break the agent could not fix.
+      - name: Fail the run
+        if: always() && steps.decide.outputs.fixed != 'true'
+        run: |
+          echo "::error::A tutorial broke and could not be repaired automatically; an issue was filed."
+          exit 1
