@@ -1,0 +1,32 @@
+---
+title: "Check a balance"
+description: "A page whose claims rest on the toy CLI rather than on the shell."
+docci:
+  cleanup:
+    - rm -f toy
+---
+
+The toy CLI reports a wallet's balance. Build it first:
+
+{/* docci name="build the toy cli" */}
+
+```bash
+go build -o ./toy ./fixtures/toy-cli
+```
+
+## Read the balance
+
+`balance` prints the amount and the symbol it is denominated in. The demo
+wallet holds 10 DEMO:
+
+{/* docci name="toy reports a balance" */}
+
+```bash
+./toy balance
+```
+
+{/* docci expect-output */}
+
+```json
+{"balance": "10", "symbol": "DEMO"}
+```
