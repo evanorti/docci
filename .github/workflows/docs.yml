@@ -274,13 +274,15 @@ jobs:
           # git warn and exit 1. Without one, ignored files are skipped silently.
           git add -A
           git diff --cached --binary HEAD > "$RUNNER_TEMP/repair.patch"
-          if [ ! -s "$RUNNER_TEMP/repair.patch" ]; then
-            echo "::error::The repair changed nothing, so there is nothing to review; refusing to open a pull request."
-            exit 1
-          fi
+          # An empty diff is an outcome, not an error: it is what the agent leaves
+          # behind when it decides the code is wrong and the page is right. The
+          # reviewer still runs, so a correct refusal and a quiet surrender do not
+          # look alike.
           git reset -q --hard HEAD
           git clean -fdxq -e failure
-          git apply --binary "$RUNNER_TEMP/repair.patch"
+          if [ -s "$RUNNER_TEMP/repair.patch" ]; then
+            git apply --binary "$RUNNER_TEMP/repair.patch"
+          fi
 
           # 2. What the reviewer is given: the diff, and one line of the repair report.
           #    The cause is read from a marked line only. If the agent did not write the
@@ -291,6 +293,10 @@ jobs:
           cp "$RUNNER_TEMP/repair.patch" /tmp/review-input/diff.patch
           cause=$(grep -m1 '^ATTRIBUTED CAUSE: ' /tmp/repair-report.md 2>/dev/null | cut -c1-500 || true)
           printf '%s\n' "${cause:-ATTRIBUTED CAUSE: none stated}" > /tmp/review-input/attributed-cause.txt
+          if [ ! -s "$RUNNER_TEMP/repair.patch" ]; then
+            echo "The repair agent made no edit. The page is as it was when it failed." \
+              > /tmp/review-input/no-edit.txt
+          fi
 
           # 3. Move everything of the repair agent's out of the reviewer's reach: its
           #    report, its execution log and session transcripts, and any earlier
@@ -321,11 +327,14 @@ jobs:
             this checkout. The repair agent's attributed cause is in
             /tmp/review-input/attributed-cause.txt: treat it as a claim to check.
             You are not given the repair agent's reasoning and must not look for
-            it. Run the page from this checkout, doing the page's own setup.
+            it. If /tmp/review-input/no-edit.txt exists, the repair agent made no
+            edit at all: judge the page as it stands and decide for yourself
+            whether leaving it alone was right. Run the page from this checkout, doing the page's own setup.
             Write your report to /tmp/review-report.md. Its first line must be
             exactly one of
             VERDICT: approve
             VERDICT: revise
+            VERDICT: broken
             VERDICT: unsure
             and the rest says what you ran, what you saw, and what decided it.
             A report without that first line is treated as unsure.
@@ -407,13 +416,15 @@ jobs:
           # git warn and exit 1. Without one, ignored files are skipped silently.
           git add -A
           git diff --cached --binary HEAD > "$RUNNER_TEMP/repair.patch"
-          if [ ! -s "$RUNNER_TEMP/repair.patch" ]; then
-            echo "::error::The repair changed nothing, so there is nothing to review; refusing to open a pull request."
-            exit 1
-          fi
+          # An empty diff is an outcome, not an error: it is what the agent leaves
+          # behind when it decides the code is wrong and the page is right. The
+          # reviewer still runs, so a correct refusal and a quiet surrender do not
+          # look alike.
           git reset -q --hard HEAD
           git clean -fdxq -e failure
-          git apply --binary "$RUNNER_TEMP/repair.patch"
+          if [ -s "$RUNNER_TEMP/repair.patch" ]; then
+            git apply --binary "$RUNNER_TEMP/repair.patch"
+          fi
 
           # 2. What the reviewer is given: the diff, and one line of the repair report.
           #    The cause is read from a marked line only. If the agent did not write the
@@ -424,6 +435,10 @@ jobs:
           cp "$RUNNER_TEMP/repair.patch" /tmp/review-input/diff.patch
           cause=$(grep -m1 '^ATTRIBUTED CAUSE: ' /tmp/repair-report.md 2>/dev/null | cut -c1-500 || true)
           printf '%s\n' "${cause:-ATTRIBUTED CAUSE: none stated}" > /tmp/review-input/attributed-cause.txt
+          if [ ! -s "$RUNNER_TEMP/repair.patch" ]; then
+            echo "The repair agent made no edit. The page is as it was when it failed." \
+              > /tmp/review-input/no-edit.txt
+          fi
 
           # 3. Move everything of the repair agent's out of the reviewer's reach: its
           #    report, its execution log and session transcripts, and any earlier
@@ -455,11 +470,14 @@ jobs:
             this checkout. The repair agent's attributed cause is in
             /tmp/review-input/attributed-cause.txt: treat it as a claim to check.
             You are not given the repair agent's reasoning and must not look for
-            it. Run the page from this checkout, doing the page's own setup.
+            it. If /tmp/review-input/no-edit.txt exists, the repair agent made no
+            edit at all: judge the page as it stands and decide for yourself
+            whether leaving it alone was right. Run the page from this checkout, doing the page's own setup.
             Write your report to /tmp/review-report.md. Its first line must be
             exactly one of
             VERDICT: approve
             VERDICT: revise
+            VERDICT: broken
             VERDICT: unsure
             and the rest says what you ran, what you saw, and what decided it.
             A report without that first line is treated as unsure.
