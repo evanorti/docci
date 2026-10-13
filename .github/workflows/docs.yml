@@ -371,7 +371,9 @@ jobs:
           # request.
           git reset -q --hard HEAD
           git clean -fdxq -e failure
-          git apply --binary "$RUNNER_TEMP/repair.patch"
+          if [ -s "$RUNNER_TEMP/repair.patch" ]; then
+            git apply --binary "$RUNNER_TEMP/repair.patch"
+          fi
       # One revision, once. If the reviewer asks for changes, the repair agent
       # gets them and the reviewer looks again. If it
       # still says revise, the pull request opens with the objections in the
@@ -515,7 +517,9 @@ jobs:
           # request.
           git reset -q --hard HEAD
           git clean -fdxq -e failure
-          git apply --binary "$RUNNER_TEMP/repair.patch"
+          if [ -s "$RUNNER_TEMP/repair.patch" ]; then
+            git apply --binary "$RUNNER_TEMP/repair.patch"
+          fi
       # Fixed means the reviewer approved, or asked for changes that were made.
       # Anything else -- the agent gave up, the reviewer found the code broken, the
       # reviewer was unsure, a step above failed or never ran -- is not fixed,
@@ -630,6 +634,16 @@ jobs:
               echo
               echo "${REASON:-The repair job stopped before reaching a verdict.}"
               echo
+              # The cause the repair agent attributed, if it marked one. It is a
+              # claim, not a finding, so it is labelled as one -- but it is the
+              # first thing a human wants, so it goes above the fold.
+              if sudo test -s /var/withheld/repair-report.md; then
+                cause=$(sudo grep -m1 '^ATTRIBUTED CAUSE: ' /var/withheld/repair-report.md | cut -c1-500 || true)
+                if [ -n "${cause:-}" ]; then
+                  echo "**The repair agent's attributed cause.** ${cause#ATTRIBUTED CAUSE: }"
+                  echo
+                fi
+              fi
               echo "Run: $RUN_URL"
               echo
               python3 - "$record" <<'PY'
