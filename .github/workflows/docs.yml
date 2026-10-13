@@ -205,19 +205,11 @@ jobs:
       - name: Install docci
         run: go build -o /usr/local/bin/docci .
 
-      # Temporary. Proves the secret holds the same bytes as the key that works
-      # locally, without printing it: a length and a hash prefix.
-      - name: Fingerprint the key
-        env:
-          K: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: |
-          printf 'len=%s sha=%s\n' "${#K}" "$(printf '%s' "$K" | sha256sum | cut -c1-12)"
-
       - name: Repair
         id: agent
         uses: anthropics/claude-code-action@v1
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # The brief lives in a file so it is reviewed as prose and versioned
           # with the repository; this prompt only points at it.
           prompt: |
@@ -357,7 +349,7 @@ jobs:
         id: review1
         uses: anthropics/claude-code-action@v1
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: |
             A repair agent edited a failing tutorial and its check now passes.
             You are the reviewer. Read .github/review-brief.md and follow it.
@@ -425,7 +417,7 @@ jobs:
         if: steps.verdict1.outputs.verdict == 'revise'
         uses: anthropics/claude-code-action@v1
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: |
             A reviewer read your fix and asked for changes. They are in
             /tmp/review-feedback.md. Read .github/agent-brief.md again and
@@ -550,7 +542,7 @@ jobs:
         if: steps.verdict1.outputs.verdict == 'revise'
         uses: anthropics/claude-code-action@v1
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: |
             A repair agent edited a failing tutorial and its check now passes.
             You are the reviewer. Read .github/review-brief.md and follow it.
