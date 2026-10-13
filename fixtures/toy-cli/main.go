@@ -17,8 +17,7 @@ func main() {
 	case "status":
 		fmt.Println(`{"state": "SUCCEEDED", "height": "12"}`)
 	case "balance":
-		fmt.Fprintln(os.Stderr, "balance: backend unavailable")
-		os.Exit(1)
+		fmt.Println(`{"balance": "10", "symbol": "DEMO"}`)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command %q\n", os.Args[1])
 		os.Exit(1)
