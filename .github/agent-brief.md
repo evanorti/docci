@@ -40,8 +40,10 @@ apply.
 
 ## What you have
 
-`failure/*.json` is the failure record. It holds the page, the diff under test
-(pull request) or the upstream range (schedule), the log, and a `failures` list.
+`failure/*.json` is the failure record. It holds the page, the log, and a
+`failures` list. It records what was observed, not why; the investigation is
+yours. This runs nightly, so the question is what changed since the last green
+run.
 That list is every failure in the run, first ten, with `failures_omitted`
 counting the rest. Each entry has the step, the expected output and the actual
 output. The top-level `step`, `expected` and `actual` only repeat `failures[0]`.
@@ -55,8 +57,8 @@ A live environment with docci installed and the page's dependencies up.
    `failures_omitted` is above zero, treat the page as broadly broken and look
    harder at the cause before editing.
 
-2. **Diagnose.** Find what changed. For a pull request, read the diff. For a
-   schedule, read the upstream range named in the record. Name the commit or
+2. **Diagnose.** Find what changed since the last green run, using git
+   history and `gh` (see "The history" below). Name the commit or
    release you believe caused this. If you cannot find one, say so. That is
    evidence the code regressed rather than the docs drifting.
 

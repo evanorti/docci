@@ -27,9 +27,11 @@ concurrency:
   group: docs
   cancel-in-progress: false
 
+# actions: read lets the agent look up the last green run with `gh run list`.
 # id-token: the action mints an OIDC token to obtain its GitHub app token and
 # fails without it.
 permissions:
+  actions: read
   contents: write
   pull-requests: write
   issues: write
