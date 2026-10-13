@@ -228,6 +228,16 @@ jobs:
             --max-turns 60
             --allowedTools Bash,Read,Edit,Write,Grep,Glob
 
+      # Diagnostic. The action hides the agent's output, which also hides the
+      # reason a run ends with zero turns. This prints the one field that says
+      # why — the result text — and nothing else the agent read or wrote.
+      - name: Why the agent stopped
+        if: always() && steps.agent.outputs.execution_file != ''
+        run: |
+          jq -r '.[] | select(.type == "result")
+                     | [.subtype, (.is_error|tostring), (.result // .error // "")]
+                     | @tsv' "${{ steps.agent.outputs.execution_file }}" | head -20
+
       # The weakening guard. It runs after the agent and outside its control:
       # the brief asks the agent to check itself with `docci review`, but this
       # step is what decides whether a pull request opens, because an agent that
