@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Build the failure record that the check job hands to the repair job.
 
-The record is the whole interface between the guard and the fixer. It is
-written down rather than rediscovered so that the repair job reproduces the
-failure the guard actually saw -- an intermittent page would otherwise send the
-fixer chasing a different failure than the one reported -- and so there is
-something to read when the repair itself misbehaves.
+The record is the whole interface between the run that found the break and the
+agents that answer for it. It is written down rather than rediscovered so that
+the repair job reproduces the failure CI actually saw -- an intermittent page
+would otherwise send the fixer chasing a different failure than the one
+reported -- and so there is something to read when the repair itself
+misbehaves.
 
 docci prints two failure shapes in its "=== Validation Errors ===" section:
   - checkpoint mismatch: "... does not match the expected output ..." followed
