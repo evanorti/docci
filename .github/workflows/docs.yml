@@ -196,14 +196,34 @@ jobs:
           PY
           done
 
-      # Built from this repository's source, so the agent and the guard run the
-      # same docci that the branch under repair contains.
+      # Built from this repository's source, so the agents run the same docci
+      # that the branch under repair contains.
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
 
       - name: Install docci
         run: go build -o /usr/local/bin/docci .
+
+      # The pull request may touch only the pages that failed. The guard used to
+      # emit this list; it is mechanical, so it stays even though the guard went.
+      - name: List the failing pages
+        id: pages
+        run: |
+          set -eu
+          shopt -s nullglob
+          records=(failure/*.json)
+          if [ "${#records[@]}" -eq 0 ]; then
+            echo "::error::No failure records; there is nothing to repair."
+            exit 1
+          fi
+          {
+            echo "pages<<EOF"
+            for record in "${records[@]}"; do
+              python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['page'])" "$record"
+            done
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Repair
         id: agent
@@ -237,69 +257,10 @@ jobs:
                      | [.subtype, (.is_error|tostring), (.result // .error // "")]
                      | @tsv' "${{ steps.agent.outputs.execution_file }}" | head -20
 
-      # The weakening guard. It runs after the agent and outside its control:
-      # the brief asks the agent to check itself with `docci review`, but this
-      # step is what decides whether a pull request opens, because an agent that
-      # can skip its own guard has no guard.
-      #
-      # It fails closed. Exit 2 (weakened) fails the job, and so does exit 1
-      # (could not compare), a missing base version, and a missing page. Nothing
-      # here is allowed to `continue` past a page it could not check.
-      - name: Guard the agent's own diff
-        id: guard
-        run: |
-          set -eu
-          shopt -s nullglob
-          records=(failure/*.json)
-          if [ "${#records[@]}" -eq 0 ]; then
-            echo "::error::No failure records; nothing to guard against, so refusing to open a pull request."
-            exit 1
-          fi
-          pages=()
-          for record in "${records[@]}"; do
-            page=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['page'])" "$record")
-            base=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['base_commit'])" "$record")
-            pages+=("$page")
-            if [ ! -f "$page" ]; then
-              echo "::error::$page is missing after the repair; refusing to open a pull request."
-              exit 1
-            fi
-            basepage="$RUNNER_TEMP/base-$(basename "$page")"
-            git show "$base:$page" > "$basepage"
-            status=0
-            docci review "$basepage" "$page" || status=$?
-            if [ "$status" -eq 2 ]; then
-              echo "::error::Repair weakened an assertion on $page; refusing to open a pull request."
-              exit 2
-            elif [ "$status" -ne 0 ]; then
-              echo "::error::docci review could not compare $page (exit $status); refusing to open a pull request."
-              exit 1
-            fi
-          done
-          # The agent repairs documentation. A change outside the failing pages
-          # is not a repair, so it does not ride into the pull request.
-          changed=$(git status --porcelain --untracked-files=all -- . ':!failure' | cut -c4-)
-          while IFS= read -r file; do
-            [ -z "$file" ] && continue
-            ok=0
-            for page in "${pages[@]}"; do [ "$file" = "$page" ] && ok=1; done
-            if [ "$ok" -eq 0 ]; then
-              echo "::error::Repair changed $file, which is not a failing page; refusing to open a pull request."
-              exit 1
-            fi
-          done <<< "$changed"
-          # The pages this step just checked, for the pull request to add and
-          # nothing else. create-pull-request would otherwise `git add -A` and
-          # commit failure/ (up to 400KB of CI log per record) and whatever the
-          # agent's run left behind.
-          {
-            echo "pages<<PAGES_EOF"
-            printf '%s\n' "${pages[@]}"
-            echo "PAGES_EOF"
-          } >> "$GITHUB_OUTPUT"
-
-      # The review. It runs after the guard, which is mechanical, and reads what
-      # the guard cannot: whether each command still does what the page says.
+      # The review. It is the only check on the repair, so it owns every
+      # question the diff cannot answer: whether each command still does what
+      # the page says, whether a changed value is what the program really
+      # prints, and whether the page got weaker rather than merely different.
       # It gets the failure records, the diff and one marked line of the repair
       # report. It is not given the repair agent's reasoning.
       - name: Prepare a clean review environment
@@ -386,6 +347,7 @@ jobs:
             case "$first" in
               "VERDICT: approve") verdict=approve ;;
               "VERDICT: revise")  verdict=revise ;;
+              "VERDICT: broken")  verdict=broken ;;
               "VERDICT: unsure")  verdict=unsure ;;
             esac
           else
@@ -402,7 +364,7 @@ jobs:
           git clean -fdxq -e failure
           git apply --binary "$RUNNER_TEMP/repair.patch"
       # One revision, once. If the reviewer asks for changes, the repair agent
-      # gets them, the guard runs again, and the reviewer looks again. If it
+      # gets them and the reviewer looks again. If it
       # still says revise, the pull request opens with the objections in the
       # body for a human to settle. There is no third round.
       - name: Give the reviewer's changes to the repair agent
@@ -432,68 +394,6 @@ jobs:
           claude_args: |
             --max-turns 40
             --allowedTools Bash,Read,Edit,Write,Grep,Glob
-
-      # The weakening guard, again, on the revision. It runs after the agent and outside its control:
-      # the brief asks the agent to check itself with `docci review`, but this
-      # step is what decides whether a pull request opens, because an agent that
-      # can skip its own guard has no guard.
-      #
-      # It fails closed. Exit 2 (weakened) fails the job, and so does exit 1
-      # (could not compare), a missing base version, and a missing page. Nothing
-      # here is allowed to `continue` past a page it could not check.
-      - name: Guard the revision
-        id: guard2
-        if: steps.verdict1.outputs.verdict == 'revise'
-        run: |
-          set -eu
-          shopt -s nullglob
-          records=(failure/*.json)
-          if [ "${#records[@]}" -eq 0 ]; then
-            echo "::error::No failure records; nothing to guard against, so refusing to open a pull request."
-            exit 1
-          fi
-          pages=()
-          for record in "${records[@]}"; do
-            page=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['page'])" "$record")
-            base=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['base_commit'])" "$record")
-            pages+=("$page")
-            if [ ! -f "$page" ]; then
-              echo "::error::$page is missing after the repair; refusing to open a pull request."
-              exit 1
-            fi
-            basepage="$RUNNER_TEMP/base-$(basename "$page")"
-            git show "$base:$page" > "$basepage"
-            status=0
-            docci review "$basepage" "$page" || status=$?
-            if [ "$status" -eq 2 ]; then
-              echo "::error::Repair weakened an assertion on $page; refusing to open a pull request."
-              exit 2
-            elif [ "$status" -ne 0 ]; then
-              echo "::error::docci review could not compare $page (exit $status); refusing to open a pull request."
-              exit 1
-            fi
-          done
-          # The agent repairs documentation. A change outside the failing pages
-          # is not a repair, so it does not ride into the pull request.
-          changed=$(git status --porcelain --untracked-files=all -- . ':!failure' | cut -c4-)
-          while IFS= read -r file; do
-            [ -z "$file" ] && continue
-            ok=0
-            for page in "${pages[@]}"; do [ "$file" = "$page" ] && ok=1; done
-            if [ "$ok" -eq 0 ]; then
-              echo "::error::Repair changed $file, which is not a failing page; refusing to open a pull request."
-              exit 1
-            fi
-          done <<< "$changed"
-          # The pages this step just checked, for the pull request to add and
-          # nothing else. create-pull-request would otherwise `git add -A` and
-          # commit failure/ (up to 400KB of CI log per record) and whatever the
-          # agent's run left behind.
-          {
-            echo "pages<<PAGES_EOF"
-            printf '%s\n' "${pages[@]}"
-            echo "PAGES_EOF"
-          } >> "$GITHUB_OUTPUT"
 
       - name: Prepare a clean review environment (second round)
         id: isolate2
@@ -582,6 +482,7 @@ jobs:
             case "$first" in
               "VERDICT: approve") verdict=approve ;;
               "VERDICT: revise")  verdict=revise ;;
+              "VERDICT: broken")  verdict=broken ;;
               "VERDICT: unsure")  verdict=unsure ;;
             esac
           else
@@ -597,8 +498,8 @@ jobs:
           git reset -q --hard HEAD
           git clean -fdxq -e failure
           git apply --binary "$RUNNER_TEMP/repair.patch"
-      # Fixed means the guard passed on every round that ran and the reviewer did
-      # not say unsure. Anything else -- the agent gave up, the guard refused, the
+      # Fixed means the reviewer approved, or asked for changes that were made.
+      # Anything else -- the agent gave up, the reviewer found the code broken, the
       # reviewer was unsure, a step above failed or never ran -- is not fixed,
       # and `always()` is what lets this step see that. A verdict of revise after
       # the one revision is still fixed: the pull request opens with the
@@ -607,8 +508,6 @@ jobs:
         id: decide
         if: always()
         env:
-          GUARD1: ${{ steps.guard.outcome }}
-          GUARD2: ${{ steps.guard2.outcome }}
           V1: ${{ steps.verdict1.outputs.verdict }}
           V2: ${{ steps.verdict2.outputs.verdict }}
         run: |
@@ -616,21 +515,22 @@ jobs:
           fixed=false
           final=""
           round=1
-          reason="The repair agent did not produce a fix that passed the guard."
-          if [ "$GUARD1" = success ] && [ -n "$V1" ]; then
+          reason="The repair agent did not produce a fix the reviewer could read."
+          if [ -n "$V1" ]; then
             final="$V1"
             if [ "$V1" = revise ]; then
               round=2
-              if [ "$GUARD2" = success ] && [ -n "$V2" ]; then
+              if [ -n "$V2" ]; then
                 final="$V2"
               else
                 final=""
-                reason="The reviewer asked for a revision and the revision did not pass the guard."
+                reason="The reviewer asked for a revision and the revision never came back."
               fi
             fi
           fi
           case "$final" in
             approve|revise) fixed=true ;;
+            broken) reason="The reviewer ran the page and found the code itself broken, not the documentation (round $round)." ;;
             unsure) reason="The reviewer was unsure whether the repair is right (round $round)." ;;
           esac
           echo "fixed=$fixed" >> "$GITHUB_OUTPUT"
@@ -653,7 +553,7 @@ jobs:
             if sudo test -s /var/withheld/repair-report.md; then
               sudo cat /var/withheld/repair-report.md
             else
-              echo "The repair agent produced no report. The edit passed the weakening guard, but read it carefully before merging."
+              echo "The repair agent produced no report. The reviewer approved the edit, but read it carefully before merging."
             fi
             echo
             echo "---"
@@ -681,18 +581,15 @@ jobs:
             fi
           } > /tmp/pr-body.md
 
-      # Cannot run unless Decide said fixed, which requires the guard's own
-      # outcome to be success on every round that ran.
+      # Cannot run unless Decide said fixed, which requires a reviewer verdict.
       - name: Open a pull request
         if: steps.decide.outputs.fixed == 'true' && steps.body.outcome == 'success'
         uses: peter-evans/create-pull-request@v6
         with:
           base: ${{ github.event.repository.default_branch }}
           branch: docs-repair/${{ github.run_id }}
-          # Only the pages the guard checked. The revision guard, when it ran,
-          # re-checked the same records, so its list wins. The failure records
-          # are never added.
-          add-paths: ${{ steps.guard2.outputs.pages || steps.guard.outputs.pages }}
+          # Only the pages that failed. The failure records are never added.
+          add-paths: ${{ steps.pages.outputs.pages }}
           title: "docs: repair failing tutorial"
           body-path: /tmp/pr-body.md
           labels: docs-repair
