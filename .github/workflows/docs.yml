@@ -309,7 +309,9 @@ jobs:
           # 1. Capture the repair as a patch, then return the checkout to the base commit
           #    with the patch applied and nothing else. This discards whatever the repair
           #    agent's attempts left lying around in the working tree.
-          git add -A -- . ':!failure'
+          # No pathspec: a pathspec that matches the ignored failure records makes
+          # git warn and exit 1. Without one, ignored files are skipped silently.
+          git add -A
           git diff --cached --binary HEAD > "$RUNNER_TEMP/repair.patch"
           if [ ! -s "$RUNNER_TEMP/repair.patch" ]; then
             echo "::error::The repair changed nothing, so there is nothing to review; refusing to open a pull request."
@@ -501,7 +503,9 @@ jobs:
           # 1. Capture the repair as a patch, then return the checkout to the base commit
           #    with the patch applied and nothing else. This discards whatever the repair
           #    agent's attempts left lying around in the working tree.
-          git add -A -- . ':!failure'
+          # No pathspec: a pathspec that matches the ignored failure records makes
+          # git warn and exit 1. Without one, ignored files are skipped silently.
+          git add -A
           git diff --cached --binary HEAD > "$RUNNER_TEMP/repair.patch"
           if [ ! -s "$RUNNER_TEMP/repair.patch" ]; then
             echo "::error::The repair changed nothing, so there is nothing to review; refusing to open a pull request."
