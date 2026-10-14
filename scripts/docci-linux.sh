@@ -19,7 +19,7 @@
 set -euo pipefail
 
 PAGE=${1:-}
-DOCCI_VERSION=${DOCCI_VERSION:-v0.11.0-mdx.1}
+DOCCI_VERSION=${DOCCI_VERSION:-v0.12.0-mdx.1}
 VM_DIR=/var/tmp/docci-linux
 
 if [ -z "$PAGE" ]; then

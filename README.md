@@ -34,7 +34,7 @@ and so on):
 <!-- docci ignore -->
 
 ```bash
-VERSION=v0.11.0-mdx.1
+VERSION=v0.12.0-mdx.1
 BINARY=docci_Linux_x86_64.tar.gz   # or docci_Darwin_arm64.tar.gz, etc.
 curl -fsSL "https://github.com/evanorti/docci/releases/download/${VERSION}/${BINARY}" \
   | sudo tar -xzC /usr/local/bin
@@ -47,7 +47,7 @@ To build from source instead, clone this fork and install from the clone.
 <!-- docci ignore -->
 
 ```bash
-git clone https://github.com/evanorti/docci.git --depth 1 --branch v0.11.0-mdx.1
+git clone https://github.com/evanorti/docci.git --depth 1 --branch v0.12.0-mdx.1
 cd docci
 go install .
 ```
@@ -69,7 +69,7 @@ docci tags | grep -q expect-output && echo "fork" || echo "upstream"
   # docci_Linux_x86_64, docci_Linux_arm64, docci_Darwin_x86_64, docci_Darwin_arm64
   - name: Install Docci Readme Test Tool
     run: |
-      VERSION=v0.11.0-mdx.1
+      VERSION=v0.12.0-mdx.1
       BINARY=docci_Linux_x86_64.tar.gz
       curl -fsSL "https://github.com/evanorti/docci/releases/download/${VERSION}/${BINARY}" | sudo tar -xzC /usr/local/bin
       sudo chmod +x /usr/local/bin/docci
