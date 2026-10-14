@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -133,56 +134,70 @@ func Exec(commands string) (ExecResponse, error) {
 	return NewExecResponse(0, stdoutBuf.String(), stderrBuf.String(), nil), nil
 }
 
+// blockMarker matches a block boundary wherever it appears. A command whose
+// output has no trailing newline leaves the marker on the same line as that
+// output, so the marker cannot be matched as a whole line: it would be missed,
+// the block would record nothing, and the page would fail with "produced no
+// output to check". curl against an endpoint that returns bare JSON does this
+// every time.
+var blockMarker = regexp.MustCompile(`### DOCCI_BLOCK_(START|END)_(\d+) ###`)
+
 // ParseBlockOutputs extracts output for each code block based on markers
 func ParseBlockOutputs(output string) map[int]string {
 	log := logger.GetLogger()
 	log.Debug("Parsing block outputs from execution result")
 	blockOutputs := make(map[int]string)
-	lines := strings.Split(output, "\n")
 
 	var currentBlock int
 	var currentOutput strings.Builder
 	inBlock := false
+	cursor := 0
 
-	for _, line := range lines {
-		// Check for start marker
-		if strings.HasPrefix(line, "### DOCCI_BLOCK_START_") && strings.HasSuffix(line, " ###") {
-			// Extract block number
-			marker := strings.TrimPrefix(line, "### DOCCI_BLOCK_START_")
-			marker = strings.TrimSuffix(marker, " ###")
-			fmt.Sscanf(marker, "%d", &currentBlock)
-			log.Debug("Found start marker for block", "block", currentBlock)
-			inBlock = true
-			currentOutput.Reset()
-			continue
+	flush := func(upTo int) {
+		if !inBlock {
+			return
 		}
+		currentOutput.WriteString(output[cursor:upTo])
+	}
 
-		// Check for end marker
-		if strings.HasPrefix(line, "### DOCCI_BLOCK_END_") && strings.HasSuffix(line, " ###") {
+	for _, m := range blockMarker.FindAllStringSubmatchIndex(output, -1) {
+		flush(m[0])
+		kind := output[m[2]:m[3]]
+		var index int
+		fmt.Sscanf(output[m[4]:m[5]], "%d", &index)
+
+		switch kind {
+		case "START":
+			currentBlock = index
+			currentOutput.Reset()
+			inBlock = true
+			log.Debug("Found start marker for block", "block", currentBlock)
+		case "END":
 			if inBlock {
-				blockOutputs[currentBlock] = strings.TrimSpace(currentOutput.String())
-				log.Debug("Found end marker for block", "block", currentBlock, "capturedOutputLength", len(blockOutputs[currentBlock]))
+				blockOutputs[currentBlock] = cleanBlockOutput(currentOutput.String())
+				log.Debug("Found end marker for block", "block", currentBlock,
+					"capturedOutputLength", len(blockOutputs[currentBlock]))
 			}
 			inBlock = false
-			continue
 		}
-
-		// Skip code block headers
-		if strings.HasPrefix(line, "### === Code Block") {
-			continue
-		}
-
-		// Collect output if we're in a block
-		if inBlock {
-			if currentOutput.Len() > 0 {
-				currentOutput.WriteString("\n")
-			}
-			currentOutput.WriteString(line)
-		}
+		cursor = m[1]
 	}
 
 	log.Debug("Parsed block outputs", "count", len(blockOutputs))
 	return blockOutputs
+}
+
+// cleanBlockOutput drops the headers docci prints between blocks, which are
+// not output the page produced.
+func cleanBlockOutput(raw string) string {
+	kept := make([]string, 0, 8)
+	for _, line := range strings.Split(raw, "\n") {
+		if strings.HasPrefix(line, "### === Code Block") {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return strings.TrimSpace(strings.Join(kept, "\n"))
 }
 
 // ValidateOutputs checks if block outputs contain expected strings
