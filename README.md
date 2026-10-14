@@ -18,21 +18,50 @@ Find sample workspaces in the [`examples/` directory](./examples/).
 
 ### 📦 Installation
 
-[Go `1.23`+](https://go.dev/doc/install) is required. You can also download a pre-built binary from the [release page](https://github.com/Reecepbcups/docci/releases).
+> [!IMPORTANT]
+> **`go install github.com/reecepbcups/docci` does not install this fork.**
+> This repository keeps upstream's module path, so that command fetches
+> upstream, which uses a different directive syntax. A page written for this
+> fork then runs against upstream and **passes while checking nothing**,
+> because upstream ignores comment directives instead of rejecting them.
+> Install by one of the two routes below, both of which give you this fork.
+
+A pre-built binary is the shortest route. Releases are on
+[this fork's release page](https://github.com/evanorti/docci/releases); pick the
+asset for your platform (`docci_Darwin_arm64.tar.gz`, `docci_Linux_x86_64.tar.gz`,
+and so on):
 
 <!-- docci ignore -->
 
 ```bash
-go install github.com/reecepbcups/docci
+VERSION=v0.11.0-mdx.1
+BINARY=docci_Linux_x86_64.tar.gz   # or docci_Darwin_arm64.tar.gz, etc.
+curl -fsSL "https://github.com/evanorti/docci/releases/download/${VERSION}/${BINARY}" \
+  | sudo tar -xzC /usr/local/bin
+sudo chmod +x /usr/local/bin/docci
 ```
 
+To build from source instead, clone this fork and install from the clone.
+[Go `1.23`+](https://go.dev/doc/install) is required:
+
 <!-- docci ignore -->
 
 ```bash
-git clone git@github.com:Reecepbcups/docci.git --depth 1
+git clone https://github.com/evanorti/docci.git --depth 1 --branch v0.11.0-mdx.1
 cd docci
-go mod tidy
-task install # go install ./*.go
+go install .
+```
+
+#### Which binary do I have?
+
+`docci version` prints `dev` for any source build, so it cannot answer this.
+`docci tags` can: this fork lists `name` and `expect-output`, upstream lists
+neither and names its tags `docci-ignore`, `docci-output-contains` and so on.
+
+<!-- docci ignore -->
+
+```bash
+docci tags | grep -q expect-output && echo "fork" || echo "upstream"
 ```
 
 ### 🤖 Github Actions Integration
@@ -40,9 +69,9 @@ task install # go install ./*.go
   # docci_Linux_x86_64, docci_Linux_arm64, docci_Darwin_x86_64, docci_Darwin_arm64
   - name: Install Docci Readme Test Tool
     run: |
-      VERSION=v0.9.2
+      VERSION=v0.11.0-mdx.1
       BINARY=docci_Linux_x86_64.tar.gz
-      curl -fsSL "https://github.com/Reecepbcups/docci/releases/download/${VERSION}/${BINARY}" | sudo tar -xzC /usr/local/bin
+      curl -fsSL "https://github.com/evanorti/docci/releases/download/${VERSION}/${BINARY}" | sudo tar -xzC /usr/local/bin
       sudo chmod +x /usr/local/bin/docci
 
   - run: docci run YOUR_MARKDOWN_FILE.md --hide-background-logs
