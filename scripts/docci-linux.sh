@@ -9,7 +9,7 @@
 # bind-mounting the project from macOS puts the files back on the shared mount,
 # where the uid is not enforced and the problem stays hidden.
 #
-# So this copies the repository's committed HEAD onto the VM's disk and runs it
+# So this copies the repository's working tree onto the VM's disk and runs it
 # there. It does not catch anything runner-specific ($GITHUB_WORKSPACE, two slow
 # cores, images pulled cold), and an Apple Silicon VM is arm64 while most hosted
 # runners are x86.
@@ -36,25 +36,31 @@ if ! command -v colima >/dev/null 2>&1; then
 fi
 
 REPO=$(git rev-parse --show-toplevel)
-PAGE_REL=$(git -C "$REPO" ls-files --full-name --error-unmatch "$PAGE") || {
-  echo "$0: $PAGE is not committed, and this runs the committed HEAD" >&2
-  exit 2
-}
+PAGE_REL=$(cd "$(dirname "$PAGE")" && echo "$(git rev-parse --show-prefix)$(basename "$PAGE")")
 
 if ! colima status >/dev/null 2>&1; then
   echo "== starting colima"
   colima start --cpu 4 --memory 8 --disk 60
 fi
 
-echo "== copying $(git -C "$REPO" rev-parse --short HEAD) onto the VM's disk"
+# The working tree, not HEAD: the Linux check is most wanted before you commit.
+# Uncommitted work is committed inside the copy, because a page that clones its
+# own project clones a commit.
+echo "== copying the working tree onto the VM's disk"
 colima ssh -- bash -lc "
   set -euo pipefail
   rm -rf '$VM_DIR'
-  GIT_LFS_SKIP_SMUDGE=1 git clone -q 'file://$REPO' '$VM_DIR'
+  cp -a '$REPO' '$VM_DIR'
   case \$(df -T '$VM_DIR' | tail -1 | awk '{print \$2}') in
     ext4|xfs|btrfs) ;;
     *) echo 'refusing to run: $VM_DIR is not on the VM disk, so uid is not enforced' >&2; exit 1 ;;
   esac
+  cd '$VM_DIR'
+  if [ -n \"\$(git status --porcelain)\" ]; then
+    git -c user.email=docci@localhost -c user.name=docci add -A
+    git -c user.email=docci@localhost -c user.name=docci commit -qm 'uncommitted work under test'
+    echo '   (including uncommitted changes)'
+  fi
 "
 
 echo "== installing docci $DOCCI_VERSION in the VM"
