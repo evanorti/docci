@@ -6,10 +6,11 @@ docci:
 ---
 
 This page builds on the previous one rather than repeating its setup, so the
-prerequisite is run and tested too.
+prerequisite is run and tested too. It reads `counter.log`, the file the first
+page writes the height to.
 
 {/* docci output-contains="counter is 3" */}
 
 ```bash
-echo "counter is $(cat counter.txt)"
+echo "counter is $(cat counter.log)"
 ```
