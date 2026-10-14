@@ -64,10 +64,16 @@ shared mount, where the uid is not enforced, and the problem stays hidden.
 <!-- docci ignore -->
 
 ```bash
-brew install colima && colima start --cpu 4 --memory 8 --disk 60
-colima ssh
-# then, inside the VM, clone into its own filesystem and run the page there
+brew install colima
+scripts/docci-linux.sh docs/my-page.md
 ```
+
+The script starts the VM if it is not running, copies the repository's
+committed HEAD onto the VM's own disk, refuses to run if that path turns out
+not to be on it, installs the matching docci build, and runs the page there.
+Doing those steps by hand is easy to get wrong in ways that quietly defeat the
+exercise -- running on the host instead of the VM, or landing the files back on
+the shared mount.
 
 Two things it will not catch, which only a real run finds: anything that
 depends on the runner itself (workspace paths, two slow cores, images pulled
