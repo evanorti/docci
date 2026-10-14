@@ -344,7 +344,7 @@ jobs:
             and the rest says what you ran, what you saw, and what decided it.
             A report without that first line is treated as unsure.
           claude_args: |
-            --max-turns 40
+            --max-turns 80
             --allowedTools Bash,Read,Write,Grep,Glob
 
       # The action hides the reviewer's output, which also hides a reviewer that
@@ -504,7 +504,7 @@ jobs:
             and the rest says what you ran, what you saw, and what decided it.
             A report without that first line is treated as unsure.
           claude_args: |
-            --max-turns 40
+            --max-turns 80
             --allowedTools Bash,Read,Write,Grep,Glob
 
       # The action hides the reviewer's output, which also hides a reviewer that

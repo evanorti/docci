@@ -101,6 +101,13 @@ to agree with it.
 **`unsure`** — blocks. If you cannot tell whether a command still does what the
 page claims, that is the correct answer, not a failure to reach one.
 
+**Write the file before you start.** Put `VERDICT: unsure` and one line saying
+you have not finished in `/tmp/review-report.md` as your first action, then
+rewrite it when you reach a verdict. Running a page can take minutes and many
+steps, and a reviewer that runs out of room mid-run leaves no report at all:
+the run then blocks with nothing for a human to read, which is safe but
+useless. A stale "unsure" with a sentence of context beats silence.
+
 Write your verdict and your reasoning to `/tmp/review-report.md`. It becomes
 part of the pull request, so a human reads it. Say what you ran, what you saw,
 and what decided it.
