@@ -48,6 +48,32 @@ task install # go install ./*.go
   - run: docci run YOUR_MARKDOWN_FILE.md --hide-background-logs
 ````
 
+### 🐧 Check it on Linux before you check it in CI
+
+CI runs Linux. If you write on a Mac, a page can pass locally and fail in CI
+for reasons that have nothing to do with what it documents -- most often file
+ownership, because Docker Desktop does not enforce the host uid through its
+file sharing and a Linux daemon does. A container whose entrypoint drops
+privileges then cannot read a file your page just created, and the symptom
+arrives as a timeout rather than a permission error.
+
+Run the page in a Linux VM first. It has to be a VM with its own disk: a Linux
+container with the project bind-mounted from macOS puts the files back on the
+shared mount, where the uid is not enforced, and the problem stays hidden.
+
+<!-- docci ignore -->
+
+```bash
+brew install colima && colima start --cpu 4 --memory 8 --disk 60
+colima ssh
+# then, inside the VM, clone into its own filesystem and run the page there
+```
+
+Two things it will not catch, which only a real run finds: anything that
+depends on the runner itself (workspace paths, two slow cores, images pulled
+cold), and architecture -- an Apple Silicon VM is arm64 and most runners are
+x86, so an amd64-only image passes locally and fails in CI.
+
 ### 🎮 Usage
 
 <!-- docci ignore -->
