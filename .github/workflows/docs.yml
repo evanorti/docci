@@ -273,6 +273,11 @@ jobs:
           # No pathspec: a pathspec that matches the ignored failure records makes
           # git warn and exit 1. Without one, ignored files are skipped silently.
           git add -A
+          # The failure records are an input to this job, not part of the repair.
+          # They are gitignored in some repositories and not in others, so unstage
+          # them explicitly: a record inside the patch makes the re-apply below
+          # fail with "already exists in working directory".
+          git reset -q -- failure
           git diff --cached --binary HEAD > "$RUNNER_TEMP/repair.patch"
           # An empty diff is an outcome, not an error: it is what the agent leaves
           # behind when it decides the code is wrong and the page is right. The
@@ -417,6 +422,11 @@ jobs:
           # No pathspec: a pathspec that matches the ignored failure records makes
           # git warn and exit 1. Without one, ignored files are skipped silently.
           git add -A
+          # The failure records are an input to this job, not part of the repair.
+          # They are gitignored in some repositories and not in others, so unstage
+          # them explicitly: a record inside the patch makes the re-apply below
+          # fail with "already exists in working directory".
+          git reset -q -- failure
           git diff --cached --binary HEAD > "$RUNNER_TEMP/repair.patch"
           # An empty diff is an outcome, not an error: it is what the agent leaves
           # behind when it decides the code is wrong and the page is right. The
