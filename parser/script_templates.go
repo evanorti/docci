@@ -151,7 +151,9 @@ set {{BASH_FLAGS}}
 trap 'echo -e "\n     Executing CMD: $BASH_COMMAND" >&9; sleep {{DELAY}}' DEBUG
 
 {{CONTENT}}
+__docci_rc=$? # the block's own status, before the trap reset below returns 0
 trap - DEBUG # reset trap
+( exit $__docci_rc ) # restore it, so a failing block is a failing block
 `
 
 	// Retry wrapper start template

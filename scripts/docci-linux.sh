@@ -46,11 +46,15 @@ fi
 # The working tree, not HEAD: the Linux check is most wanted before you commit.
 # Uncommitted work is committed inside the copy, because a page that clones its
 # own project clones a commit.
+# Piped rather than copied from a mount: colima shares only some host paths
+# (/Users/<you> by default), so a repository anywhere else -- /private/tmp, for
+# instance -- copies as an empty directory and the failure surfaces later as a
+# confusing "no such file or directory".
 echo "== copying the working tree onto the VM's disk"
+colima ssh -- bash -lc "rm -rf '$VM_DIR' && mkdir -p '$VM_DIR'"
+tar -C "$REPO" -cf - . | colima ssh -- bash -lc "tar -C '$VM_DIR' -xf -"
 colima ssh -- bash -lc "
   set -euo pipefail
-  rm -rf '$VM_DIR'
-  cp -a '$REPO' '$VM_DIR'
   case \$(df -T '$VM_DIR' | tail -1 | awk '{print \$2}') in
     ext4|xfs|btrfs) ;;
     *) echo 'refusing to run: $VM_DIR is not on the VM disk, so uid is not enforced' >&2; exit 1 ;;
