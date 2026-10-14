@@ -347,6 +347,16 @@ jobs:
             --max-turns 40
             --allowedTools Bash,Read,Write,Grep,Glob
 
+      # The action hides the reviewer's output, which also hides a reviewer that
+      # finished without writing a report -- which reads downstream as "unsure"
+      # with no explanation. Print what it said.
+      - name: Why the reviewer stopped (round 1)
+        if: always() && steps.review1.outputs.execution_file != ''
+        run: |
+          jq -r '.[] | select(.type == "result")
+                     | [.subtype, (.is_error|tostring), (.result // .error // "")]
+                     | @tsv' "${{ steps.review1.outputs.execution_file }}" | head -40
+
       - name: Read the verdict
         id: verdict1
         env:
@@ -496,6 +506,16 @@ jobs:
           claude_args: |
             --max-turns 40
             --allowedTools Bash,Read,Write,Grep,Glob
+
+      # The action hides the reviewer's output, which also hides a reviewer that
+      # finished without writing a report -- which reads downstream as "unsure"
+      # with no explanation. Print what it said.
+      - name: Why the reviewer stopped (round 2)
+        if: always() && steps.review2.outputs.execution_file != ''
+        run: |
+          jq -r '.[] | select(.type == "result")
+                     | [.subtype, (.is_error|tostring), (.result // .error // "")]
+                     | @tsv' "${{ steps.review2.outputs.execution_file }}" | head -40
 
       - name: Read the verdict (second round)
         id: verdict2
