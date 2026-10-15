@@ -72,11 +72,16 @@ A live environment with docci installed and the page's dependencies up.
 4. **Run the whole page.** `docci run <page>`. Not a partial check. A fix that
    makes step 4 pass while breaking step 7 is not a fix.
 
-5. **Check your own diff.** `docci review <base-page> <edited-page>`, where the
-   base is the page as it was before you touched it.
-   - Exit 0: the edit claims what the page claimed before. Proceed.
-   - Exit 2: the edit claims less than it did in a way that matters. **Stop.**
-   - Exit 1: the two pages could not be compared. **Stop.**
+5. **Look at your own diff.** `docci review <base-page> <edited-page>`, where
+   the base is the page as it was before you touched it, prints what each
+   assertion did: unchanged, re-expressed, reduced, hardcoded. Read it as a
+   second opinion on your own work.
+
+   It is not a gate, and its exit code decides nothing. It compares text, so
+   it cannot tell a corrected value from a weakened one -- restoring a stale
+   `false` to `true` reads to it exactly like deleting the assertion. A
+   reviewer who runs the page decides that. Use the output to catch yourself
+   loosening something by accident, not as permission to proceed.
 
    The tool makes the judgement, so you do not have to. It classifies each edit.
    Only a reduction that removes something load-bearing, or replacing a derived
@@ -149,8 +154,8 @@ on anything your own run accumulated.
 
 ## What you may change
 
-Commands, flags, step order, prose, and assertions, as long as `docci review`
-exits 0.
+Commands, flags, step order, prose, and assertions -- on the pages named in
+the failure records, and no other file.
 
 ## What you may not do
 
@@ -173,7 +178,7 @@ Leave your edits in the working tree and do not commit them. The workflow
 commits and opens the pull request, and the action collects the changes itself,
 so a commit of your own leaves it with nothing to collect.
 
-**Green and `docci review` exits 0:** a pull request, one for the page. The body
+**Green:** a pull request, one for the page. The body
 gives:
 - the attributed cause,
 - the tier the fix landed in, and why no higher tier applied,

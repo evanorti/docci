@@ -83,8 +83,14 @@ def truncate(log):
         mid = budget // 4
         head = tail = (budget - mid) // 2
         end = len(log) - tail
-        return (log[:head] + notice(section - head) + log[section:section + mid]
-                + notice(end - section - mid) + log[end:], True)
+        # The middle slice can reach past where the tail begins. Left alone it
+        # repeats text and reports a negative number of characters dropped.
+        stop = min(section + mid, end)
+        parts = [log[:head], notice(section - head), log[section:stop]]
+        if end > stop:
+            parts.append(notice(end - stop))
+        parts.append(log[end:])
+        return "".join(parts), True
 
     omitted = len(log) - head - tail
     return log[:head] + notice(omitted) + log[len(log) - tail:], True

@@ -70,7 +70,10 @@ colima ssh -- bash -lc "
 echo "== installing docci $DOCCI_VERSION in the VM"
 colima ssh -- bash -lc "
   set -euo pipefail
-  if ! command -v docci >/dev/null 2>&1; then
+  # Always install the pinned build. Reusing whatever docci the VM happens to
+  # have is how you end up running an upstream binary that ignores these
+  # directives, asserts nothing, and reports success.
+  if true; then
     case \$(uname -m) in
       aarch64) BIN=docci_Linux_arm64.tar.gz ;;
       x86_64)  BIN=docci_Linux_x86_64.tar.gz ;;

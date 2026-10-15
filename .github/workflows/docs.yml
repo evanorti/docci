@@ -57,8 +57,22 @@ jobs:
         id: list
         run: |
           set -eu
+          # A missing docs directory, or any other grep error, must not read as
+          # "no page carries a directive": that skips every page and the run
+          # goes green having checked nothing.
+          if [ ! -d "$DOCS_DIR" ]; then
+            echo "::error::DOCS_DIR ($DOCS_DIR) is not a directory."
+            exit 1
+          fi
+          status=0
           grep -rlE --include='*.md' --include='*.mdx' '\{/\* docci|<!-- docci' "$DOCS_DIR" \
-            | sort > pages.txt || true
+            | sort > pages.txt || status=$?
+          # grep exits 1 for "no matches", which is a real answer; anything
+          # above that is a failure to look.
+          if [ "$status" -gt 1 ]; then
+            echo "::error::Could not search $DOCS_DIR for docci directives (grep exit $status)."
+            exit 1
+          fi
           echo "pages:"; cat pages.txt
           if [ -s pages.txt ]; then
             pages=$(python3 -c "import json,sys; print(json.dumps([l.strip() for l in open('pages.txt') if l.strip()]))")
@@ -140,6 +154,10 @@ jobs:
     outputs:
       any: ${{ steps.count.outputs.any }}
     steps:
+      # Downloading fails both when nothing was uploaded, which is the happy
+      # path, and when the download itself breaks. Those must not look alike:
+      # treating a broken download as "nothing failed" turns a broken page into
+      # a green run with no repair and no issue.
       - uses: actions/download-artifact@v4
         continue-on-error: true
         with:
@@ -148,10 +166,22 @@ jobs:
           merge-multiple: true
       - name: Count failure records
         id: count
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          set -eu
           shopt -s nullglob
           records=(failure/*.json)
-          echo "${#records[@]} failure record(s)"
+          echo "${#records[@]} failure record(s) on disk"
+
+          uploaded=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts" \
+            --jq '[.artifacts[] | select(.name | startswith("failure-record-"))] | length')
+          echo "$uploaded failure record(s) uploaded by the check job"
+
+          if [ "${#records[@]}" -eq 0 ] && [ "$uploaded" -gt 0 ]; then
+            echo "::error::$uploaded failure record(s) were uploaded but none downloaded; refusing to report this run as clean."
+            exit 1
+          fi
           if [ "${#records[@]}" -gt 0 ]; then echo "any=true" >> "$GITHUB_OUTPUT"; else echo "any=false" >> "$GITHUB_OUTPUT"; fi
 
   repair:
